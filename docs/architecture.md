@@ -23,9 +23,11 @@ Entry point using Typer. Commands:
 
 ### 3. File Discovery (`discovery.py`)
 
-- Scans home directory for dotfiles
-- Applies exclude patterns and include extras
-- Returns list of files to sync
+- `ConfigFile` Pydantic model: path, size, include verdict, reason, os_profile
+- `scan_candidates()`: walks `config_dirs()` roots up to depth 4, skips symlinks, files >1 MB, binary files, and hardcoded excludes (SSH keys, caches, secrets)
+- `classify_rule_based()`: matches against `KNOWN_FILES`/`KNOWN_DIRS` allowlists, user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
+- `classify_with_ai()`: sends ambiguous files to LiteLLM proxy, caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error
+- `discover()`: orchestrator — scan → rule classify → AI classify (if endpoint set) → mark remaining unknowns as `ask_user`
 
 ### 4. Flagging (`flagging.py`)
 

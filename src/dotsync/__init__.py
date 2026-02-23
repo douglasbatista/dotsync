@@ -7,13 +7,16 @@ from dotsync.config import (
     load_config,
     save_config,
 )
+from dotsync.discovery import ConfigFile, discover
 from dotsync.logging_setup import setup_logging
 from dotsync.platform_utils import config_dirs, current_os, home_dir, is_wsl
 
 __all__ = [
+    "ConfigFile",
     "ConfigNotFoundError",
     "DotSyncConfig",
     "default_config",
+    "discover",
     "load_config",
     "save_config",
     "setup_logging",

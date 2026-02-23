@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Foundation Complete ✅
+## Current Milestone: Discovery & Classification Complete ✅
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -11,17 +11,23 @@
   - [x] Prompts for confirmation when overwriting existing config
 - [x] Core module structure created
 - [x] Documentation structure established
+- [x] File discovery and classification (`discovery.py`)
+  - [x] `ConfigFile` Pydantic model
+  - [x] `scan_candidates()` with depth/size/binary/exclude filtering
+  - [x] `classify_rule_based()` with allowlists and user patterns
+  - [x] `classify_with_ai()` with LiteLLM proxy and persistent cache
+  - [x] `discover()` orchestrator
+  - [x] 23 tests with full acceptance criteria coverage
 
 ### In Progress
-- [ ] File discovery implementation
 - [ ] Git operations implementation
 - [ ] Sync engine implementation
 
 ### Pending
+- [ ] Flagging implementation
 - [ ] Snapshot management
 - [ ] Health check integration
 - [ ] UI/progress indicators
-- [ ] AI triage integration
 - [ ] `sync` command implementation
 - [ ] `restore` command implementation
 - [ ] `rollback` command implementation
@@ -31,6 +37,6 @@
 
 ## Next Steps
 
-1. Implement `discovery.py` - scan for dotfiles
-2. Implement `git_ops.py` - GitPython + git-crypt subprocess calls
-3. Implement `sync.py` - core sync logic
+1. Implement `git_ops.py` - GitPython + git-crypt subprocess calls
+2. Implement `sync.py` - core sync logic
+3. Implement `flagging.py` - change tracking between syncs
