@@ -7,7 +7,7 @@
 Key architectural decisions (do not change without instruction):
 - `git` and `git-crypt` are called via `subprocess` — no Python bindings exist for git-crypt
 - `GitPython` handles all other Git operations
-- AI calls use plain `httpx` — no LLM SDK
+- AI calls use plain `httpx` targeting OpenAI-compatible endpoints (`/v1/chat/completions`) — no LLM SDK. Works with LiteLLM, OpenRouter, Ollama, or any OpenAI-compatible proxy.
 - Snapshots are local only, never committed to the repo
 
 ---

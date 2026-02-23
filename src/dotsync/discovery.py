@@ -9,10 +9,10 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Literal
 
-import httpx
 from pydantic import BaseModel
 
 from dotsync.config import CONFIG_DIR, DotSyncConfig
+from dotsync.llm_client import LLMError, chat_completion
 from dotsync.platform_utils import config_dirs, home_dir
 
 # ---------------------------------------------------------------------------
@@ -48,86 +48,43 @@ class ConfigFile(BaseModel):
 
 KNOWN_FILES: frozenset[str] = frozenset(
     {
-        ".bashrc",
-        ".bash_profile",
-        ".bash_aliases",
-        ".profile",
-        ".zshrc",
-        ".zshenv",
-        ".zprofile",
-        ".zsh_history",
         ".gitconfig",
         ".gitignore_global",
+        ".bashrc",
+        ".bash_profile",
+        ".zshrc",
+        ".zshenv",
+        ".profile",
         ".vimrc",
+        ".ideavimrc",
         ".tmux.conf",
-        ".wgetrc",
-        ".curlrc",
-        ".inputrc",
-        ".editorconfig",
-        ".npmrc",
-        ".yarnrc",
-        ".pylintrc",
-        ".flake8",
-        ".prettierrc",
-        ".eslintrc",
-        ".hushlogin",
-        ".config/starship.toml",
-        ".config/fish/config.fish",
-        ".config/nvim/init.vim",
-        ".config/nvim/init.lua",
-        ".config/alacritty/alacritty.toml",
-        ".config/kitty/kitty.conf",
-        ".config/hyper/.hyper.js",
-        ".config/Code/User/settings.json",
-        ".config/Code/User/keybindings.json",
+        ".wslconfig",
         ".ssh/config",
     }
 )
 
 KNOWN_DIRS: frozenset[str] = frozenset(
     {
-        ".config/nvim",
         ".config/fish",
+        ".config/nvim",
         ".config/alacritty",
         ".config/kitty",
-        ".config/Code/User/snippets",
+        ".config/starship.toml",
+        ".config/htop",
+        "AppData/Roaming/Code/User",
+        ".config/Code/User",
     }
 )
 
 HARDCODED_EXCLUDES: frozenset[str] = frozenset(
     {
-        # SSH private keys
         ".ssh/id_*",
-        ".ssh/*.pem",
-        # GPG keyrings
-        ".gnupg/*",
-        # Caches and histories
-        ".cache/*",
-        ".local/*",
-        "__pycache__/*",
-        "*.pyc",
-        ".npm/_*",
-        "node_modules/*",
-        # OS artifacts
-        ".DS_Store",
-        "Thumbs.db",
-        "desktop.ini",
-        # Package lock files
-        "package-lock.json",
-        "yarn.lock",
-        # Secrets and credentials
-        "*.key",
-        "*.pem",
-        ".env",
-        ".env.*",
-        "credentials.json",
-        "token.json",
-        # Large / binary dirs
-        ".vscode-server/*",
-        ".cargo/*",
-        ".rustup/*",
-        ".nvm/*",
-        ".pyenv/*",
+        ".gnupg/",
+        ".cache/",
+        ".local/share/",
+        "node_modules/",
+        "__pycache__/",
+        ".git/",
     }
 )
 
@@ -154,12 +111,17 @@ def _is_binary(path: Path) -> bool:
 
 
 def _is_excluded(rel_str: str) -> bool:
-    """Check if a relative path matches any hardcoded exclude pattern."""
+    """Check if a relative path matches any hardcoded exclude pattern.
+
+    Supports glob patterns (e.g. ``.ssh/id_*``) via fnmatch and
+    directory prefixes with trailing slash (e.g. ``.cache/``).
+    """
     for pattern in HARDCODED_EXCLUDES:
-        if fnmatch(rel_str, pattern):
-            return True
-        # Also check just the filename for patterns without directory
-        if "/" not in pattern and fnmatch(Path(rel_str).name, pattern):
+        if pattern.endswith("/"):
+            # Directory-style pattern: match as prefix
+            if rel_str.startswith(pattern) or rel_str == pattern.rstrip("/"):
+                return True
+        elif fnmatch(rel_str, pattern):
             return True
     return False
 
@@ -427,35 +389,25 @@ def classify_with_ai(
             {
                 "path": str(cf.path),
                 "size_bytes": cf.size_bytes,
-                "first_lines": _read_first_lines(cf.abs_path),
+                "first_lines": "\n".join(_read_first_lines(cf.abs_path)),
                 "modified_days_ago": days_ago,
             }
         )
 
-    prompt = (
+    system_prompt = (
         "You are a dotfile classifier. For each file, respond with a JSON array "
-        "of objects with keys 'path' and 'verdict'. verdict must be one of: "
-        "'include', 'exclude', or 'unknown'. Only output the JSON array, nothing else."
+        "of objects with keys 'path', 'verdict', and 'reason'. verdict must be "
+        "one of: 'include', 'exclude', or 'ask_user'. Only output the JSON array, "
+        "nothing else."
     )
 
-    payload = {
-        "model": cfg.llm_model,
-        "messages": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps(items)},
-        ],
-        "temperature": 0,
-    }
-
     try:
-        resp = httpx.post(
-            f"{cfg.llm_endpoint}/chat/completions",
-            json=payload,
-            timeout=15.0,
+        content = chat_completion(
+            endpoint=cfg.llm_endpoint,
+            model=cfg.llm_model,
+            system_prompt=system_prompt,
+            user_message=json.dumps(items),
         )
-        resp.raise_for_status()
-        body = resp.json()
-        content = body["choices"][0]["message"]["content"]
         verdicts_raw = json.loads(content)
 
         verdict_map: dict[str, str] = {}
@@ -479,7 +431,7 @@ def classify_with_ai(
 
             cache[key] = {"include": cf.include, "reason": cf.reason}
 
-    except (httpx.HTTPError, KeyError, json.JSONDecodeError, TypeError, IndexError):
+    except (LLMError, json.JSONDecodeError, TypeError):
         for cf in to_classify:
             cf.include = None
             cf.reason = "ask_user"
@@ -489,7 +441,7 @@ def classify_with_ai(
 
 
 # ---------------------------------------------------------------------------
-# Step 2.5 — discover orchestrator
+# Step 2.6 — discover orchestrator
 # ---------------------------------------------------------------------------
 
 

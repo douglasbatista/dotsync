@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import httpx
+from unittest.mock import patch
 
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import (
@@ -20,6 +18,7 @@ from dotsync.discovery import (
     discover,
     scan_candidates,
 )
+from dotsync.llm_client import LLMError
 
 
 # ---------------------------------------------------------------------------
@@ -213,25 +212,10 @@ class TestClassifyWithAI:
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
         cf = self._make_candidate(tmp_path, "myapp.conf")
 
-        response_body = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            [{"path": "myapp.conf", "verdict": "include"}]
-                        )
-                    }
-                }
-            ]
-        }
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = response_body
-        mock_resp.raise_for_status = MagicMock()
+        ai_response = json.dumps([{"path": "myapp.conf", "verdict": "include"}])
 
         with (
-            patch("dotsync.discovery.httpx.post", return_value=mock_resp),
+            patch("dotsync.discovery.chat_completion", return_value=ai_response),
             patch("dotsync.discovery._load_classification_cache", return_value={}),
             patch("dotsync.discovery._save_classification_cache"),
         ):
@@ -245,7 +229,7 @@ class TestClassifyWithAI:
         cf = self._make_candidate(tmp_path, "myapp.conf")
 
         with (
-            patch("dotsync.discovery.httpx.post", side_effect=httpx.ConnectError("refused")),
+            patch("dotsync.discovery.chat_completion", side_effect=LLMError("refused")),
             patch("dotsync.discovery._load_classification_cache", return_value={}),
             patch("dotsync.discovery._save_classification_cache"),
         ):
@@ -263,12 +247,11 @@ class TestClassifyWithAI:
         with (
             patch("dotsync.discovery._load_classification_cache", return_value=cache),
             patch("dotsync.discovery._save_classification_cache"),
-            patch("dotsync.discovery.httpx.post") as mock_post,
+            patch("dotsync.discovery.chat_completion") as mock_chat,
         ):
             result = classify_with_ai([cf], cfg)
 
-        # Should NOT have called the API
-        mock_post.assert_not_called()
+        mock_chat.assert_not_called()
         assert result[0].include is True
         assert result[0].reason == "ai:include"
 
@@ -276,22 +259,7 @@ class TestClassifyWithAI:
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
         cf = self._make_candidate(tmp_path, "newfile.conf")
 
-        response_body = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            [{"path": "newfile.conf", "verdict": "exclude"}]
-                        )
-                    }
-                }
-            ]
-        }
-
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = response_body
-        mock_resp.raise_for_status = MagicMock()
+        ai_response = json.dumps([{"path": "newfile.conf", "verdict": "exclude"}])
 
         saved_cache: dict = {}
 
@@ -299,7 +267,7 @@ class TestClassifyWithAI:
             saved_cache.update(cache)
 
         with (
-            patch("dotsync.discovery.httpx.post", return_value=mock_resp),
+            patch("dotsync.discovery.chat_completion", return_value=ai_response),
             patch("dotsync.discovery._load_classification_cache", return_value={}),
             patch("dotsync.discovery._save_classification_cache", side_effect=capture_save),
         ):
@@ -311,7 +279,7 @@ class TestClassifyWithAI:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.5 — discover orchestrator
+# Step 2.6 — discover orchestrator
 # ---------------------------------------------------------------------------
 
 
