@@ -1,0 +1,35 @@
+[project]
+name = "dotsync"
+version = "0.1.0"
+description = "CLI tool to backup, sync, and encrypt configuration files across Windows and Linux workstations"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gitpython>=3.1.46",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.5",
+    "rich>=14.3.3",
+    "tomli-w>=1.2.0",
+    "typer>=0.24.1",
+]
+
+[project.scripts]
+dotsync = "dotsync.main:app"
+
+[dependency-groups]
+dev = [
+    "hatchling>=1.28.0",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "ruff>=0.15.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dotsync"]
+
+[tool.uv]
+package = true
