@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Discovery & Classification Complete ✅
+## Current Milestone: Sensitive Data Flagging Complete ✅
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -23,8 +23,17 @@
 - [ ] Git operations implementation
 - [ ] Sync engine implementation
 
+### Completed (continued)
+- [x] Sensitive data flagging (`flagging.py`)
+  - [x] 11 compiled regex patterns for secret detection
+  - [x] `NEVER_INCLUDE` defense-in-depth blocklist
+  - [x] `scan_file_for_secrets()` line-by-line scanner
+  - [x] `ai_flag_check()` with LLM integration and mtime-keyed cache
+  - [x] `flag_all()` orchestrator
+  - [x] `enforce_never_include()` blocklist enforcement
+  - [x] 21 tests with full coverage
+
 ### Pending
-- [ ] Flagging implementation
 - [ ] Snapshot management
 - [ ] Health check integration
 - [ ] UI/progress indicators

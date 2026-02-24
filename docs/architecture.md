@@ -34,8 +34,14 @@ Entry point using Typer. Commands:
 
 ### 4. Flagging (`flagging.py`)
 
-- Tracks which files have been modified
-- Maintains state between sync operations
+Content-based sensitive data detection for files marked `include=True` by discovery. Defense-in-depth layer before files enter the git repo.
+
+- `SENSITIVE_PATTERNS`: 11 compiled regexes (GitHub tokens, AWS keys, OpenAI/Anthropic keys, PEM blocks, connection strings, generic token/api_key, email)
+- `NEVER_INCLUDE`: hardcoded blocklist (`.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/`, `dotsync_key`) — defense-in-depth behind `SAFETY_EXCLUDES`
+- `scan_file_for_secrets(path)`: line-by-line regex scan, skips `#`-commented lines for generic patterns, redacts matched values in preview
+- `ai_flag_check(path, cfg)`: sends first 30 lines to LLM for sensitivity assessment, caches results by `{path}:{mtime}`, fails open on error
+- `flag_all(files, cfg)`: orchestrator — scans included files, only calls AI when no regex matches found, returns `FlagResult` with `requires_confirmation` flag
+- `enforce_never_include(files)`: mutates files matching `NEVER_INCLUDE` to `include=False, reason="never_include"`
 
 ### 5. Git Operations (`git_ops.py`)
 

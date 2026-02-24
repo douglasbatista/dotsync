@@ -26,5 +26,15 @@
 - `llm_client.chat_completion()` timeout parameter is now positional (`int`, was keyword-only `float`)
 - Test suite expanded from 23 to 35 tests
 
+### Added (continued)
+- Sensitive data flagging (`flagging.py`)
+  - `SENSITIVE_PATTERNS`: 11 compiled regexes for secret detection (GitHub, AWS, OpenAI, Anthropic, PEM, connection strings, generic token/api_key, email)
+  - `NEVER_INCLUDE` defense-in-depth blocklist for SSH keys, `.gnupg/`, and `dotsync_key`
+  - `scan_file_for_secrets()` with line-by-line scanning, comment skipping, and redacted previews
+  - `ai_flag_check()` with LLM sensitivity assessment and mtime-keyed cache
+  - `flag_all()` orchestrator with smart AI skip (no AI call when regex already matched)
+  - `enforce_never_include()` blocklist enforcement
+- 21 tests covering patterns, scanning, AI flagging, orchestration, never-include enforcement, and redaction
+
 ### Fixed
 - None
