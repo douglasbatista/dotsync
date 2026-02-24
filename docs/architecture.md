@@ -45,9 +45,16 @@ Content-based sensitive data detection for files marked `include=True` by discov
 
 ### 5. Git Operations (`git_ops.py`)
 
-- Uses GitPython for standard Git operations
-- Calls git-crypt via subprocess for encryption
-- Manages the dotfiles repository
+Storage backbone — manages the dotfiles Git repository and git-crypt encryption.
+
+- **Dependency checks**: `check_dependencies()` verifies `git` and `git-crypt` are on PATH with platform-specific install hints
+- **Repo init**: `init_repo(cfg)` creates/opens repo, writes `.gitattributes` (git-crypt catch-all + exclusions), empty `.dotsync_manifest.json`, initial commit; idempotent
+- **git-crypt**: `init_gitcrypt()` runs `git-crypt init` + `export-key` via subprocess; `unlock_gitcrypt()` runs `git-crypt unlock`; errors wrapped as `GitCryptError`
+- **Remote management**: `set_remote()` creates/updates origin; `get_remote()` returns URL or `None`
+- **Manifest**: `ManifestEntry` dataclass tracks `relative_path`, `os_profile`, `added_at`, `sensitive_flagged`; CRUD via `load_manifest()`, `save_manifest()`, `add_to_manifest()` (dedup by path), `remove_from_manifest()`
+- **Commit/push/pull**: `commit_and_push()` stages all, commits, pushes (raises `NoRemoteConfiguredError` if no origin); `pull()` fetches and checks `unmerged_blobs()` for `MergeConflictError`
+- **File copying**: `copy_to_repo()` copies file preserving relative path structure and metadata via `shutil.copy2`
+- Custom exceptions: `MissingDependencyError`, `GitCryptError`, `NoRemoteConfiguredError`, `MergeConflictError`
 
 ### 6. Sync Engine (`sync.py`)
 

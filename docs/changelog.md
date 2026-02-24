@@ -36,5 +36,18 @@
   - `enforce_never_include()` blocklist enforcement
 - 21 tests covering patterns, scanning, AI flagging, orchestration, never-include enforcement, and redaction
 
+### Added (continued)
+- Git & git-crypt integration (`git_ops.py`)
+  - `check_dependencies()` with platform-specific install hints (linux/windows)
+  - `init_repo()` — idempotent repo creation with `.gitattributes` and manifest
+  - `init_gitcrypt()` / `unlock_gitcrypt()` — subprocess wrappers with `GitCryptError`
+  - `set_remote()` / `get_remote()` — origin remote management
+  - `ManifestEntry` dataclass with `load_manifest()`, `save_manifest()`, `add_to_manifest()`, `remove_from_manifest()`
+  - `commit_and_push()` — stage all, commit, push with clean-tree skip
+  - `pull()` — fetch with `MergeConflictError` on unmerged blobs
+  - `copy_to_repo()` — copy files preserving relative paths and metadata
+  - Custom exceptions: `MissingDependencyError`, `GitCryptError`, `NoRemoteConfiguredError`, `MergeConflictError`
+- 24 tests covering dependency checks, repo init, git-crypt, remotes, manifest, push/pull, file copying
+
 ### Fixed
 - None
