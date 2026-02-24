@@ -70,5 +70,17 @@
   - `verify_snapshot()` — integrity check against manifest (missing/extra file detection)
 - 20 tests covering index management, snapshot creation, rollback, retention, and integrity verification
 
+### Added (continued)
+- Health checks (`health.py`)
+  - `HealthCheck` and `HealthCheckResult` dataclasses
+  - `DEFAULT_CHECKS`: git and shell availability checks
+  - `run_check()` — single check runner with timeout and command-not-found handling
+  - `run_all_checks()` — batch runner combining defaults, user checks, and extras
+  - `all_passed()` — convenience predicate for results
+  - `check_and_rollback_if_needed()` — auto-rollback trigger with `snapshot.rollback()`
+  - `post_operation_checks()` — single integration point for sync/restore
+  - `HealthCheckFailedError` exception with failed check summary
+- 19 tests covering data model, runner, batch, rollback, and orchestration
+
 ### Fixed
 - None

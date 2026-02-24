@@ -83,8 +83,15 @@ Local-only timestamped backups of managed files, created automatically before an
 
 ### 8. Health Checks (`health.py`)
 
-- Runs configured health check commands
-- Validates sync operations completed successfully
+Post-operation safety net — runs configurable shell commands after sync/restore to verify the system is still healthy. Automatically rolls back on failure.
+
+- **Data model**: `HealthCheck` (name, command, timeout, expected exit code, enabled) and `HealthCheckResult` (pass/fail, exit code, stdout/stderr, duration)
+- **Default checks**: `DEFAULT_CHECKS` verifies `git --version` and `${SHELL} -c 'echo ok'` — always run unless disabled
+- **Single runner**: `run_check()` executes via `subprocess.run` with `shell=False`, `shlex.split` after `os.path.expandvars`; handles `TimeoutExpired` (exit=-1) and `FileNotFoundError` (exit=-2)
+- **Batch runner**: `run_all_checks(cfg)` combines defaults + user checks from `cfg.health_checks` + optional extra checks; sequential execution for cascading failure detection
+- **Auto-rollback**: `check_and_rollback_if_needed()` calls `snapshot.rollback()` when any check fails, then raises `HealthCheckFailedError` with failed check names and snapshot ID
+- **Orchestration**: `post_operation_checks()` is the single integration point for sync/restore — runs all checks, triggers rollback on failure, logs results
+- Custom exception: `HealthCheckFailedError`
 
 ### 9. UI (`ui.py`)
 

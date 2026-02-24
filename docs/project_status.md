@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Snapshot & Rollback Complete ✅
+## Current Milestone: Health Checks Complete ✅
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -55,11 +55,21 @@
   - [x] `verify_snapshot()` — integrity verification
   - [x] 20 tests with full coverage
 
+- [x] Health checks (`health.py`)
+  - [x] `HealthCheck` and `HealthCheckResult` dataclasses
+  - [x] `DEFAULT_CHECKS` (git, shell)
+  - [x] `run_check()` — single check runner with timeout/not-found handling
+  - [x] `run_all_checks()` — batch runner (defaults + user + extras)
+  - [x] `all_passed()` — result predicate
+  - [x] `check_and_rollback_if_needed()` — auto-rollback trigger
+  - [x] `post_operation_checks()` — single integration point
+  - [x] `HealthCheckFailedError` exception
+  - [x] 19 tests with full coverage
+
 ### In Progress
 - (none)
 
 ### Pending
-- [ ] Health check integration
 - [ ] UI/progress indicators
 - [ ] `sync` command implementation
 - [ ] `restore` command implementation
@@ -71,6 +81,5 @@
 ## Next Steps
 
 1. Wire up CLI commands (`sync`, `restore`, `rollback`, `status`)
-2. Implement `health.py` - health check integration
-3. UI/progress indicators
-4. Integration and end-to-end testing
+2. UI/progress indicators
+3. Integration and end-to-end testing
