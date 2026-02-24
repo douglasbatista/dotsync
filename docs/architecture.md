@@ -58,9 +58,14 @@ Storage backbone — manages the dotfiles Git repository and git-crypt encryptio
 
 ### 6. Sync Engine (`sync.py`)
 
-- Core sync logic
-- Copies files between home directory and repository
-- Handles conflicts and versioning
+Orchestrates file operations between the home directory and the dotfiles repository.
+
+- **OS profile filter**: `filter_by_profile()` returns entries matching `current_os` or `"shared"`
+- **Path transformer**: `transform_paths()` rewrites home-directory paths in file content across platforms (Linux ↔ Windows), matching only value positions (after `=`, `:`, or in quotes) to avoid mangling URLs
+- **Sync (home → repo)**: `SyncAction` dataclass; `plan_sync()` filters by profile and checks file existence; `execute_sync()` copies files with `shutil.copy2`, supports dry-run
+- **Restore (repo → home)**: `RestoreAction` dataclass; `plan_restore()` checks profile and repo file existence; `execute_restore()` copies files, optionally applying cross-platform path transforms for shared files
+- **New file registration**: `register_new_files()` accepts pre-confirmed files from the CLI layer, copies to repo and adds manifest entries; supports dry-run
+- **Conflict detection**: `detect_conflicts()` compares mtime of local and repo copies against `last_sync` — conflict when both sides modified after last sync
 
 ### 7. Snapshots (`snapshot.py`)
 

@@ -49,5 +49,15 @@
   - Custom exceptions: `MissingDependencyError`, `GitCryptError`, `NoRemoteConfiguredError`, `MergeConflictError`
 - 24 tests covering dependency checks, repo init, git-crypt, remotes, manifest, push/pull, file copying
 
+### Added (continued)
+- Sync engine (`sync.py`)
+  - `filter_by_profile()` — OS profile filtering (shared + current OS)
+  - `transform_paths()` — cross-platform path transformation (Linux ↔ Windows) with URL protection
+  - `SyncAction` / `plan_sync()` / `execute_sync()` — home → repo sync with dry-run support
+  - `RestoreAction` / `plan_restore()` / `execute_restore()` — repo → home restore with optional path transforms
+  - `register_new_files()` — new file registration from discovery/flagging pipeline
+  - `Conflict` / `detect_conflicts()` — mtime-based conflict detection
+- 24 tests covering profile filtering, path transforms, sync, restore, registration, and conflict detection
+
 ### Fixed
 - None

@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Git & git-crypt Integration Complete ✅
+## Current Milestone: Sync Engine Complete ✅
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -36,8 +36,17 @@
   - [x] `copy_to_repo()` — preserves relative paths and metadata
   - [x] 24 tests with full coverage
 
+- [x] Sync engine (`sync.py`)
+  - [x] `filter_by_profile()` — OS profile filtering
+  - [x] `transform_paths()` — cross-platform path transformation with URL protection
+  - [x] `SyncAction` / `plan_sync()` / `execute_sync()` — home → repo sync
+  - [x] `RestoreAction` / `plan_restore()` / `execute_restore()` — repo → home restore
+  - [x] `register_new_files()` — new file registration
+  - [x] `Conflict` / `detect_conflicts()` — mtime-based conflict detection
+  - [x] 24 tests with full coverage
+
 ### In Progress
-- [ ] Sync engine implementation
+- (none)
 
 ### Pending
 - [ ] Snapshot management
@@ -52,6 +61,6 @@
 
 ## Next Steps
 
-1. Implement `sync.py` - core sync logic
-2. Implement `snapshot.py` - local snapshot management
-3. Wire up CLI commands (`sync`, `restore`, `status`)
+1. Implement `snapshot.py` - local snapshot management
+2. Wire up CLI commands (`sync`, `restore`, `status`)
+3. Implement `health.py` - health check integration
