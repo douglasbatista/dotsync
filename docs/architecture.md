@@ -69,9 +69,17 @@ Orchestrates file operations between the home directory and the dotfiles reposit
 
 ### 7. Snapshots (`snapshot.py`)
 
-- Creates local snapshots before sync operations
-- Manages snapshot retention based on `snapshot_keep` config
-- Snapshots are local-only, never committed
+Local-only timestamped backups of managed files, created automatically before any write operation (sync/restore).
+
+- **Storage**: `~/.dotsync/snapshots/<snapshot_id>/` with relative path structure mirroring home directory
+- **Index**: `snapshot_index.json` tracks `SnapshotMeta` entries (id, created_at, trigger, file_count, hostname)
+- **Creation**: `create_snapshot()` copies each manifest entry that exists under home, using `shutil.copy2` for metadata preservation; auto-runs retention
+- **Rollback**: `rollback(snapshot_id)` restores files from a snapshot directory back to home; `rollback_latest()` delegates to the newest snapshot; both support `dry_run` mode
+- **Listing**: `list_snapshots()` returns all snapshots sorted newest-first
+- **Retention**: `apply_retention(keep)` deletes oldest snapshots beyond the limit; `keep=0` disables (keeps all)
+- **Integrity**: `verify_snapshot()` checks a snapshot against manifest entries, reporting missing and extra files
+- Custom exception: `SnapshotNotFoundError`
+- Snapshots never enter the Git repository
 
 ### 8. Health Checks (`health.py`)
 

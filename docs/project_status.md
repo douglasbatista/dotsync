@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Sync Engine Complete ✅
+## Current Milestone: Snapshot & Rollback Complete ✅
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -45,11 +45,20 @@
   - [x] `Conflict` / `detect_conflicts()` — mtime-based conflict detection
   - [x] 24 tests with full coverage
 
+- [x] Snapshot & rollback (`snapshot.py`)
+  - [x] `SnapshotMeta` dataclass and `SnapshotNotFoundError`
+  - [x] Index management (`load_index`, `save_index`, `snapshot_dir_for`)
+  - [x] `create_snapshot()` — timestamped file backup with auto-retention
+  - [x] `list_snapshots()` — newest-first listing
+  - [x] `rollback()` / `rollback_latest()` — file restoration with dry-run
+  - [x] `apply_retention()` — configurable cleanup (keep=0 disables)
+  - [x] `verify_snapshot()` — integrity verification
+  - [x] 20 tests with full coverage
+
 ### In Progress
 - (none)
 
 ### Pending
-- [ ] Snapshot management
 - [ ] Health check integration
 - [ ] UI/progress indicators
 - [ ] `sync` command implementation
@@ -61,6 +70,7 @@
 
 ## Next Steps
 
-1. Implement `snapshot.py` - local snapshot management
-2. Wire up CLI commands (`sync`, `restore`, `status`)
-3. Implement `health.py` - health check integration
+1. Wire up CLI commands (`sync`, `restore`, `rollback`, `status`)
+2. Implement `health.py` - health check integration
+3. UI/progress indicators
+4. Integration and end-to-end testing

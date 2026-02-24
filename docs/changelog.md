@@ -59,5 +59,16 @@
   - `Conflict` / `detect_conflicts()` — mtime-based conflict detection
 - 24 tests covering profile filtering, path transforms, sync, restore, registration, and conflict detection
 
+### Added (continued)
+- Snapshot & rollback (`snapshot.py`)
+  - `SnapshotMeta` dataclass and `SnapshotNotFoundError` exception
+  - `SNAPSHOTS_DIR` constant (`~/.dotsync/snapshots/`) and JSON index management
+  - `create_snapshot()` — timestamped backup of managed files before sync/restore with automatic retention
+  - `list_snapshots()` — list all snapshots sorted newest-first
+  - `rollback()` / `rollback_latest()` — restore files from a snapshot with dry-run support
+  - `apply_retention(keep)` — delete oldest snapshots beyond limit; `keep=0` keeps all
+  - `verify_snapshot()` — integrity check against manifest (missing/extra file detection)
+- 20 tests covering index management, snapshot creation, rollback, retention, and integrity verification
+
 ### Fixed
 - None
