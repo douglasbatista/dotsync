@@ -43,53 +43,48 @@ class ConfigFile(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Allowlists and excludes
+# Exclude lists and heuristic rules
 # ---------------------------------------------------------------------------
 
-KNOWN_FILES: frozenset[str] = frozenset(
-    {
-        ".gitconfig",
-        ".gitignore_global",
-        ".bashrc",
-        ".bash_profile",
-        ".zshrc",
-        ".zshenv",
-        ".profile",
-        ".vimrc",
-        ".ideavimrc",
-        ".tmux.conf",
-        ".wslconfig",
-        ".ssh/config",
-    }
-)
+SAFETY_EXCLUDES: list[str] = [
+    ".ssh/id_*",
+    ".ssh/id_*.pub",
+    ".gnupg/",
+    ".dotsync/",
+    "dotsync.key",
+]
 
-KNOWN_DIRS: frozenset[str] = frozenset(
-    {
-        ".config/fish",
-        ".config/nvim",
-        ".config/alacritty",
-        ".config/kitty",
-        ".config/starship.toml",
-        ".config/htop",
-        "AppData/Roaming/Code/User",
-        ".config/Code/User",
-    }
-)
+SCAN_EXCLUDES: list[str] = [
+    ".cache/",
+    ".local/share/",
+    ".local/lib/",
+    "node_modules/",
+    "__pycache__/",
+    ".git/",
+    ".venv/",
+    "venv/",
+    ".tox/",
+]
 
-HARDCODED_EXCLUDES: frozenset[str] = frozenset(
+HEURISTIC_RULES: list[dict] = [
+    {"pattern": "is_home_dotfile", "max_depth": 1, "reason": "home dotfile"},
+    {"pattern": "under_config_dir", "max_depth": 3, "reason": "XDG config"},
     {
-        ".ssh/id_*",
-        ".gnupg/",
-        ".cache/",
-        ".local/share/",
-        "node_modules/",
-        "__pycache__/",
-        ".git/",
-    }
-)
+        "pattern": "windows_appdata",
+        "max_depth": 4,
+        "reason": "Windows app config",
+        "extensions": [".json", ".toml", ".yaml", ".yml", ".ini", ".conf", ".xml", ".cfg"],
+    },
+    {
+        "pattern": "config_extension",
+        "max_depth": 2,
+        "reason": "config extension",
+        "extensions": [".toml", ".yaml", ".yml", ".ini", ".conf", ".cfg"],
+    },
+]
 
-MAX_DEPTH = 4
-MAX_FILE_SIZE = 1_000_000  # 1 MB
+MAX_DEPTH = 5
+MAX_FILE_SIZE = 512_000
 BINARY_CHECK_BYTES = 8192
 
 CLASSIFICATION_CACHE_FILE = CONFIG_DIR / "classification_cache.json"
@@ -110,13 +105,13 @@ def _is_binary(path: Path) -> bool:
         return True
 
 
-def _is_excluded(rel_str: str) -> bool:
-    """Check if a relative path matches any hardcoded exclude pattern.
+def _is_excluded(rel_str: str, patterns: list[str]) -> bool:
+    """Check if a relative path matches any exclude pattern.
 
     Supports glob patterns (e.g. ``.ssh/id_*``) via fnmatch and
     directory prefixes with trailing slash (e.g. ``.cache/``).
     """
-    for pattern in HARDCODED_EXCLUDES:
+    for pattern in patterns:
         if pattern.endswith("/"):
             # Directory-style pattern: match as prefix
             if rel_str.startswith(pattern) or rel_str == pattern.rstrip("/"):
@@ -159,12 +154,20 @@ def scan_candidates(extra_paths: list[Path] | None = None) -> list[Path]:
                 dirnames.clear()
                 continue
 
-            # Skip symlink directories
-            dirnames[:] = [
-                d
-                for d in dirnames
-                if not (dirpath / d).is_symlink()
-            ]
+            # Skip symlink directories and scan-excluded directories
+            filtered: list[str] = []
+            for d in dirnames:
+                child = dirpath / d
+                if child.is_symlink():
+                    continue
+                try:
+                    rel_d = str(child.relative_to(home)) + "/"
+                except ValueError:
+                    rel_d = d + "/"
+                if _is_excluded(rel_d, SCAN_EXCLUDES):
+                    continue
+                filtered.append(d)
+            dirnames[:] = filtered
 
             for fname in filenames:
                 fpath = dirpath / fname
@@ -184,8 +187,8 @@ def scan_candidates(extra_paths: list[Path] | None = None) -> list[Path]:
                     rel = fpath
                 rel_str = str(rel)
 
-                # Apply hardcoded excludes
-                if _is_excluded(rel_str):
+                # Apply safety excludes
+                if _is_excluded(rel_str, SAFETY_EXCLUDES):
                     continue
 
                 # Skip large files
@@ -203,11 +206,19 @@ def scan_candidates(extra_paths: list[Path] | None = None) -> list[Path]:
                 seen.add(resolved)
                 results.append(fpath)
 
-    # Merge extra paths
+    # Merge extra paths (still subject to safety excludes)
     if extra_paths:
         for ep in extra_paths:
             ep_abs = ep if ep.is_absolute() else home / ep
-            if ep_abs.is_file() and ep_abs.resolve() not in seen:
+            if not ep_abs.is_file():
+                continue
+            try:
+                ep_rel = str(ep_abs.relative_to(home))
+            except ValueError:
+                ep_rel = str(ep_abs)
+            if _is_excluded(ep_rel, SAFETY_EXCLUDES):
+                continue
+            if ep_abs.resolve() not in seen:
                 seen.add(ep_abs.resolve())
                 results.append(ep_abs)
 
@@ -215,7 +226,7 @@ def scan_candidates(extra_paths: list[Path] | None = None) -> list[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.3 — classify_rule_based
+# Step 2.3 — heuristic classifier
 # ---------------------------------------------------------------------------
 
 
@@ -228,24 +239,54 @@ def _detect_os_profile(rel_str: str) -> Literal["linux", "windows", "shared"]:
     return "shared"
 
 
-def classify_rule_based(
+def _matches_heuristic(rel: Path, rule: dict) -> bool:
+    """Check if a relative path matches a heuristic rule.
+
+    Depth is counted as number of path parts after the anchor directory.
+    """
+    parts = rel.parts
+    n_parts = len(parts)
+    pattern = rule["pattern"]
+    max_depth = rule["max_depth"]
+    extensions = rule.get("extensions", [])
+
+    if pattern == "is_home_dotfile":
+        return n_parts == 1 and parts[0].startswith(".")
+
+    if pattern == "under_config_dir":
+        return parts[0] == ".config" and (n_parts - 1) <= max_depth
+
+    if pattern == "windows_appdata":
+        try:
+            appdata_idx = list(parts).index("AppData")
+        except ValueError:
+            return False
+        if (n_parts - appdata_idx - 1) > max_depth:
+            return False
+        return rel.suffix in extensions
+
+    if pattern == "config_extension":
+        return (n_parts - 1) <= max_depth and rel.suffix in extensions
+
+    return False
+
+
+def classify_heuristic(
     candidates: list[Path],
-    exclude_patterns: list[str] | None = None,
-    include_extra: list[str] | None = None,
+    cfg: DotSyncConfig,
 ) -> list[ConfigFile]:
-    """Classify candidates using rule-based matching.
+    """Classify candidates using structural heuristic rules.
 
     Args:
         candidates: Absolute paths from scan_candidates().
-        exclude_patterns: User-configured glob patterns to exclude.
-        include_extra: User-configured extra paths to include.
+        cfg: DotSync configuration.
 
     Returns:
         List of ConfigFile with include/reason set where deterministic.
     """
     home = home_dir()
-    exclude_patterns = exclude_patterns or []
-    include_extra = include_extra or []
+    exclude_patterns = cfg.exclude_patterns or []
+    include_extra = cfg.include_extra or []
 
     results: list[ConfigFile] = []
 
@@ -263,7 +304,7 @@ def classify_rule_based(
 
         os_profile = _detect_os_profile(rel_str)
         include: bool | None = None
-        reason = "unknown"
+        reason = "ambiguous"
 
         # Check user exclude patterns first (highest priority)
         excluded_by_user = any(fnmatch(rel_str, pat) for pat in exclude_patterns)
@@ -274,18 +315,13 @@ def classify_rule_based(
         elif any(rel_str == p or str(fpath) == p for p in include_extra):
             include = True
             reason = "user_included"
-        # Check known files (exact match on relative path)
-        elif rel_str in KNOWN_FILES:
-            include = True
-            reason = "known"
-        # Check known dirs (prefix match)
-        elif any(rel_str.startswith(d + "/") or rel_str.startswith(d + os.sep) for d in KNOWN_DIRS):
-            include = True
-            reason = "known_dir"
-        # Otherwise unknown / pending
+        # Check heuristic rules (first match wins)
         else:
-            include = None
-            reason = "unknown"
+            for rule in HEURISTIC_RULES:
+                if _matches_heuristic(rel, rule):
+                    include = True
+                    reason = rule["reason"]
+                    break
 
         results.append(
             ConfigFile(
@@ -448,8 +484,8 @@ def classify_with_ai(
 def discover(cfg: DotSyncConfig) -> list[ConfigFile]:
     """Discover and classify configuration files.
 
-    Scans filesystem roots, applies rule-based classification, optionally
-    queries AI for unknown files, and returns the full list.
+    Scans filesystem roots, applies heuristic classification, optionally
+    queries AI for ambiguous files, and returns the full list.
 
     Args:
         cfg: DotSync configuration.
@@ -460,17 +496,13 @@ def discover(cfg: DotSyncConfig) -> list[ConfigFile]:
     extra = [Path(p) for p in cfg.include_extra] if cfg.include_extra else None
     candidates = scan_candidates(extra_paths=extra)
 
-    classified = classify_rule_based(
-        candidates,
-        exclude_patterns=cfg.exclude_patterns,
-        include_extra=[str(p) for p in (extra or [])],
-    )
+    classified = classify_heuristic(candidates, cfg)
 
-    # Separate unknowns for AI classification
-    unknowns = [cf for cf in classified if cf.include is None]
+    # Separate ambiguous for AI classification
+    ambiguous = [cf for cf in classified if cf.include is None]
 
-    if unknowns and cfg.llm_endpoint:
-        classify_with_ai(unknowns, cfg)
+    if ambiguous and cfg.llm_endpoint:
+        classify_with_ai(ambiguous, cfg)
 
     # Any remaining None → ask_user
     for cf in classified:

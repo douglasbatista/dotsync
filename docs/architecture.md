@@ -24,10 +24,13 @@ Entry point using Typer. Commands:
 ### 3. File Discovery (`discovery.py`)
 
 - `ConfigFile` Pydantic model: path, size, include verdict, reason, os_profile
-- `scan_candidates()`: walks `config_dirs()` roots up to depth 4, skips symlinks, files >1 MB, binary files, and hardcoded excludes (SSH keys, caches, secrets)
-- `classify_rule_based()`: matches against `KNOWN_FILES`/`KNOWN_DIRS` allowlists, user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
+- `SAFETY_EXCLUDES`: security invariants (SSH keys, `.gnupg/`, `.dotsync/`, `dotsync.key`) — never included, enforced on extra paths too
+- `SCAN_EXCLUDES`: noise directories (`.cache/`, `node_modules/`, `__pycache__/`, etc.) — pruned during walk
+- `HEURISTIC_RULES`: structural rules evaluated in order (home dotfile, XDG config, Windows AppData, config extension) with depth limits
+- `scan_candidates()`: walks `config_dirs()` roots up to depth 5, skips symlinks, files >512 KB, binary files, safety excludes, and prunes scan-excluded dirs
+- `classify_heuristic()`: matches against heuristic rules (first match wins), user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
 - `classify_with_ai()`: sends ambiguous files to LiteLLM proxy, caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error
-- `discover()`: orchestrator — scan → rule classify → AI classify (if endpoint set) → mark remaining unknowns as `ask_user`
+- `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → mark remaining ambiguous as `ask_user`
 
 ### 4. Flagging (`flagging.py`)
 

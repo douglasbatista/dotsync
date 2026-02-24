@@ -16,7 +16,15 @@
 - 23 tests covering discovery module (allowlists, scanning, rule classification, AI classification, orchestrator, cache persistence)
 
 ### Changed
-- None
+- Refactored discovery module to use structural heuristic rules instead of hardcoded tool-name allowlists
+  - Replaced `KNOWN_FILES`/`KNOWN_DIRS` with `HEURISTIC_RULES` (home dotfile, XDG config, Windows AppData, config extension)
+  - Split `HARDCODED_EXCLUDES` into `SAFETY_EXCLUDES` (security invariants) and `SCAN_EXCLUDES` (noise directories)
+  - Renamed `classify_rule_based()` → `classify_heuristic()`, now takes `DotSyncConfig` directly
+  - Updated constants: `MAX_DEPTH` 4→5, `MAX_FILE_SIZE` 1 MB→512 KB
+  - Extra paths now respect `SAFETY_EXCLUDES` (security fix)
+  - Directory pruning via `SCAN_EXCLUDES` for faster scanning
+- `llm_client.chat_completion()` timeout parameter is now positional (`int`, was keyword-only `float`)
+- Test suite expanded from 23 to 35 tests
 
 ### Fixed
 - None

@@ -8,12 +8,13 @@ from unittest.mock import patch
 
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import (
-    HARDCODED_EXCLUDES,
-    KNOWN_FILES,
+    HEURISTIC_RULES,
+    SAFETY_EXCLUDES,
+    SCAN_EXCLUDES,
     ConfigFile,
     _load_classification_cache,
     _save_classification_cache,
-    classify_rule_based,
+    classify_heuristic,
     classify_with_ai,
     discover,
     scan_candidates,
@@ -50,20 +51,29 @@ def _default_cfg(**overrides) -> DotSyncConfig:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.1 — Allowlist / exclude sanity
+# Step 2.1 — Rules and excludes sanity
 # ---------------------------------------------------------------------------
 
 
-class TestAllowlists:
-    def test_known_files_are_valid_relative_paths(self) -> None:
-        """KNOWN_FILES entries should be relative (no leading slash)."""
-        for f in KNOWN_FILES:
-            assert not f.startswith("/"), f"KNOWN_FILES entry should be relative: {f}"
+class TestRulesAndExcludes:
+    def test_safety_excludes_are_all_relative_paths(self) -> None:
+        """SAFETY_EXCLUDES entries should be relative (no leading slash)."""
+        for pat in SAFETY_EXCLUDES:
+            assert not pat.startswith("/"), f"SAFETY_EXCLUDES entry should be relative: {pat}"
 
-    def test_hardcoded_excludes_not_in_known_files(self) -> None:
-        """No overlap between hardcoded excludes and known files."""
-        for exc in HARDCODED_EXCLUDES:
-            assert exc not in KNOWN_FILES, f"Exclude pattern also in KNOWN_FILES: {exc}"
+    def test_safety_excludes_do_not_overlap_scan_excludes(self) -> None:
+        """No overlap between SAFETY_EXCLUDES and SCAN_EXCLUDES."""
+        for pat in SAFETY_EXCLUDES:
+            assert pat not in SCAN_EXCLUDES, (
+                f"Pattern in both SAFETY_EXCLUDES and SCAN_EXCLUDES: {pat}"
+            )
+
+    def test_heuristic_rules_have_required_keys(self) -> None:
+        """Every heuristic rule must have pattern, max_depth, and reason."""
+        for rule in HEURISTIC_RULES:
+            assert "pattern" in rule, f"Rule missing 'pattern': {rule}"
+            assert "max_depth" in rule, f"Rule missing 'max_depth': {rule}"
+            assert "reason" in rule, f"Rule missing 'reason': {rule}"
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +98,7 @@ class TestScanCandidates:
 
     def test_scan_skips_large_files(self, tmp_path: Path) -> None:
         _make_file(tmp_path, "small.conf", "x")
-        _make_file(tmp_path, "huge.conf", "x", size=2_000_000)
+        _make_file(tmp_path, "huge.conf", "x", size=700_000)
 
         with (
             patch("dotsync.discovery.config_dirs", return_value=[tmp_path]),
@@ -117,10 +127,10 @@ class TestScanCandidates:
         assert "text.conf" in names
         assert "binary.dat" not in names
 
-    def test_scan_respects_max_depth(self, tmp_path: Path) -> None:
-        # Depth 0 (root) -> depth 1 -> ... -> depth 5
-        _make_file(tmp_path, "a/b/c/shallow.conf", "ok")  # depth 3
-        _make_file(tmp_path, "a/b/c/d/e/deep.conf", "too deep")  # depth 5
+    def test_scan_respects_hard_max_depth(self, tmp_path: Path) -> None:
+        # MAX_DEPTH is 5; depth 4 should be found, depth 6 should not
+        _make_file(tmp_path, "a/b/c/d/shallow.conf", "ok")  # depth 4
+        _make_file(tmp_path, "a/b/c/d/e/f/deep.conf", "too deep")  # depth 6
 
         with (
             patch("dotsync.discovery.config_dirs", return_value=[tmp_path]),
@@ -145,51 +155,134 @@ class TestScanCandidates:
 
         assert extra_file in results
 
+    def test_scan_excludes_gnupg_dir(self, tmp_path: Path) -> None:
+        """Files under .gnupg/ must be excluded by SAFETY_EXCLUDES."""
+        _make_file(tmp_path, ".gnupg/pubring.kbx", "keyring")
+        _make_file(tmp_path, ".bashrc", "# bash")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[tmp_path]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "pubring.kbx" not in names
+        assert ".bashrc" in names
+
+    def test_scan_extra_paths_still_respect_safety_excludes(self, tmp_path: Path) -> None:
+        """Extra paths pointing to safety-excluded files must be rejected."""
+        key_file = _make_file(tmp_path, ".ssh/id_rsa", "secret key")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[tmp_path]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates(extra_paths=[key_file])
+
+        names = {r.name for r in results}
+        assert "id_rsa" not in names
+
 
 # ---------------------------------------------------------------------------
-# Step 2.3 — classify_rule_based
+# Step 2.3 — classify_heuristic
 # ---------------------------------------------------------------------------
 
 
-class TestClassifyRuleBased:
-    def test_known_file_included(self, tmp_path: Path) -> None:
-        f = _make_file(tmp_path, ".bashrc", "# bash config")
+class TestClassifyHeuristic:
+    def test_home_dotfile_included(self, tmp_path: Path) -> None:
+        f = _make_file(tmp_path, ".gitconfig", "# git config")
+        cfg = _default_cfg()
 
         with patch("dotsync.discovery.home_dir", return_value=tmp_path):
-            result = classify_rule_based([f])
+            result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
         assert result[0].include is True
-        assert result[0].reason == "known"
+        assert result[0].reason == "home dotfile"
 
-    def test_user_excluded_pattern(self, tmp_path: Path) -> None:
-        f = _make_file(tmp_path, ".bashrc", "# bash config")
+    def test_xdg_config_included(self, tmp_path: Path) -> None:
+        f = _make_file(tmp_path, ".config/nvim/init.lua", "-- nvim config")
+        cfg = _default_cfg()
 
         with patch("dotsync.discovery.home_dir", return_value=tmp_path):
-            result = classify_rule_based([f], exclude_patterns=[".*bashrc*"])
+            result = classify_heuristic([f], cfg)
+
+        assert len(result) == 1
+        assert result[0].include is True
+        assert result[0].reason == "XDG config"
+
+    def test_windows_appdata_json_included(self, tmp_path: Path) -> None:
+        f = _make_file(
+            tmp_path,
+            "AppData/Roaming/Code/User/settings.json",
+            "{}",
+        )
+        cfg = _default_cfg()
+
+        with patch("dotsync.discovery.home_dir", return_value=tmp_path):
+            result = classify_heuristic([f], cfg)
+
+        assert len(result) == 1
+        assert result[0].include is True
+        assert result[0].reason == "Windows app config"
+
+    def test_windows_appdata_too_deep_excluded(self, tmp_path: Path) -> None:
+        # depth after AppData: 5 parts -> exceeds max_depth 4
+        f = _make_file(
+            tmp_path,
+            "AppData/Roaming/Code/User/snippets/python.json",
+            "{}",
+        )
+        cfg = _default_cfg()
+
+        with patch("dotsync.discovery.home_dir", return_value=tmp_path):
+            result = classify_heuristic([f], cfg)
+
+        assert len(result) == 1
+        assert result[0].include is None
+
+    def test_user_exclude_overrides_heuristic(self, tmp_path: Path) -> None:
+        f = _make_file(tmp_path, ".gitconfig", "# git config")
+        cfg = _default_cfg(exclude_patterns=[".gitconfig"])
+
+        with patch("dotsync.discovery.home_dir", return_value=tmp_path):
+            result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
         assert result[0].include is False
         assert result[0].reason == "user_excluded"
 
-    def test_unknown_file_pending(self, tmp_path: Path) -> None:
-        f = _make_file(tmp_path, "random_app.conf", "stuff")
+    def test_ambiguous_file_pending(self, tmp_path: Path) -> None:
+        f = _make_file(tmp_path, "app.log", "log data")
+        cfg = _default_cfg()
 
         with patch("dotsync.discovery.home_dir", return_value=tmp_path):
-            result = classify_rule_based([f])
+            result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
         assert result[0].include is None
-        assert result[0].reason == "unknown"
+        assert result[0].reason == "ambiguous"
 
     def test_os_profile_windows(self, tmp_path: Path) -> None:
         f = _make_file(tmp_path, "AppData/Roaming/app.conf", "win config")
+        cfg = _default_cfg()
 
         with patch("dotsync.discovery.home_dir", return_value=tmp_path):
-            result = classify_rule_based([f])
+            result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
         assert result[0].os_profile == "windows"
+
+    def test_os_profile_linux(self, tmp_path: Path) -> None:
+        f = _make_file(tmp_path, ".config/app/config.toml", "linux config")
+        cfg = _default_cfg()
+
+        with patch("dotsync.discovery.home_dir", return_value=tmp_path):
+            result = classify_heuristic([f], cfg)
+
+        assert len(result) == 1
+        assert result[0].os_profile == "linux"
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +298,7 @@ class TestClassifyWithAI:
             abs_path=f,
             size_bytes=7,
             include=None,
-            reason="unknown",
+            reason="ambiguous",
         )
 
     def test_ai_classify_returns_valid_verdicts(self, tmp_path: Path) -> None:
@@ -300,13 +393,14 @@ class TestDiscover:
         assert all(isinstance(cf, ConfigFile) for cf in result)
         assert len(result) >= 1
 
-        # .bashrc should be known/included
+        # .bashrc should be included via home dotfile heuristic
         bashrc = [cf for cf in result if cf.path == Path(".bashrc")]
         assert len(bashrc) == 1
         assert bashrc[0].include is True
+        assert bashrc[0].reason == "home dotfile"
 
     def test_discover_skips_ai_when_no_endpoint(self, tmp_path: Path) -> None:
-        _make_file(tmp_path, "unknown.conf", "stuff")
+        _make_file(tmp_path, "unknown.log", "stuff")
 
         cfg = _default_cfg(llm_endpoint=None)
 
@@ -319,16 +413,16 @@ class TestDiscover:
 
         mock_ai.assert_not_called()
 
-        # Unknown files should get reason "ask_user"
-        unknowns = [cf for cf in result if cf.path == Path("unknown.conf")]
+        # Ambiguous files should get reason "ask_user"
+        unknowns = [cf for cf in result if cf.path == Path("unknown.log")]
         assert len(unknowns) == 1
         assert unknowns[0].include is None
         assert unknowns[0].reason == "ask_user"
 
     def test_discover_never_returns_reason_unknown(self, tmp_path: Path) -> None:
-        """Every file from discover() must be resolved — no reason='unknown'."""
+        """Every file from discover() must be resolved — no reason='unknown' or 'ambiguous'."""
         _make_file(tmp_path, ".bashrc", "# bash")
-        _make_file(tmp_path, "mystery.conf", "stuff")
+        _make_file(tmp_path, "mystery.log", "stuff")
         _make_file(tmp_path, "another.txt", "data")
 
         cfg = _default_cfg(llm_endpoint=None)
@@ -342,6 +436,9 @@ class TestDiscover:
         for cf in result:
             assert cf.reason != "unknown", (
                 f"{cf.path} has reason='unknown' — discover() must resolve all files"
+            )
+            assert cf.reason != "ambiguous", (
+                f"{cf.path} has reason='ambiguous' — discover() must resolve all files"
             )
 
     def test_discover_excludes_ssh_private_keys_end_to_end(self, tmp_path: Path) -> None:
@@ -366,7 +463,7 @@ class TestDiscover:
     def test_discover_ai_only_receives_unknowns(self, tmp_path: Path) -> None:
         """When AI is called, it should only receive files with include=None."""
         _make_file(tmp_path, ".bashrc", "# known file")
-        _make_file(tmp_path, "ambiguous.conf", "unknown file")
+        _make_file(tmp_path, "ambiguous.log", "unknown file")
 
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
 
@@ -386,11 +483,10 @@ class TestDiscover:
         ):
             discover(cfg)
 
-        # AI should only have received unknowns, not .bashrc
+        # AI should only have received ambiguous files, not .bashrc
         ai_paths = {str(cf.path) for cf in ai_received}
         assert ".bashrc" not in ai_paths
         # All files sent to AI should have had include=None before the call
-        # (we verify indirectly: .bashrc is known → include=True, so excluded)
         assert len(ai_received) >= 1
 
 

@@ -72,6 +72,29 @@ class TestChatCompletion:
                 user_message="msg",
             )
 
+    def test_chat_completion_accepts_positional_timeout(self) -> None:
+        """Timeout can be passed as a positional argument."""
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("dotsync.llm_client.httpx.post", return_value=mock_resp) as mock_post:
+            result = chat_completion(
+                "http://localhost:8000",
+                "test-model",
+                "You are helpful.",
+                "Hi",
+                5,
+            )
+
+        assert result == "ok"
+        mock_post.assert_called_once()
+        # Verify timeout=5 was passed through
+        assert mock_post.call_args[1]["timeout"] == 5
+
     def test_chat_completion_raises_llm_error_on_missing_choices(self) -> None:
         """Malformed response without 'choices' raises LLMError."""
         mock_resp = MagicMock(spec=httpx.Response)

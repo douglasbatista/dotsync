@@ -13,11 +13,11 @@
 - [x] Documentation structure established
 - [x] File discovery and classification (`discovery.py`)
   - [x] `ConfigFile` Pydantic model
-  - [x] `scan_candidates()` with depth/size/binary/exclude filtering
-  - [x] `classify_rule_based()` with allowlists and user patterns
+  - [x] `scan_candidates()` with depth/size/binary/safety-exclude/scan-exclude filtering
+  - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension)
   - [x] `classify_with_ai()` with LiteLLM proxy and persistent cache
   - [x] `discover()` orchestrator
-  - [x] 23 tests with full acceptance criteria coverage
+  - [x] 35 tests with full acceptance criteria coverage
 
 ### In Progress
 - [ ] Git operations implementation

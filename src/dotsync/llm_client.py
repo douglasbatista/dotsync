@@ -14,8 +14,7 @@ def chat_completion(
     model: str,
     system_prompt: str,
     user_message: str,
-    *,
-    timeout: float = 15,
+    timeout: int = 15,
 ) -> str:
     """Send a chat-completion request and return the assistant content.
 
