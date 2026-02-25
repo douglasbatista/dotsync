@@ -8,12 +8,15 @@ DotSync is a CLI tool for backing up, syncing, and encrypting configuration file
 
 ### 1. CLI Interface (`main.py`)
 
-Entry point using Typer. Commands:
-- `init` - Initialize configuration with confirmation for existing configs
-- `sync` - Sync configuration files with the repository
-- `restore` - Restore configuration files from the repository
-- `rollback` - Rollback to a previous snapshot
-- `status` - Show current repository status
+Entry point using Typer with Rich output. Seven commands with structured exit codes (0–5), global `--verbose` flag, and late imports per command.
+
+- `init` — Initialize config + repo + git-crypt; options: `--repo-path`, `--remote`, `--llm-endpoint`
+- `discover` — Scan, classify, and interactively resolve config files; option: `--no-ai`
+- `sync` — Full pipeline: discover → flag → confirm sensitive → snapshot → sync → commit/push → health checks; options: `--dry-run`, `--no-push`, `--message`
+- `restore` — Pull → snapshot → restore; or `--from-snapshot` for direct snapshot rollback; options: `--dry-run`, `--no-pull`
+- `rollback` — Interactive or explicit snapshot rollback with integrity verification; options: `--dry-run`, `--list`
+- `status` — Config summary, managed files count, snapshot count, git status
+- `config` — View (`--show`) or update (`--set KEY=VALUE`) configuration with key validation
 
 ### 2. Configuration (`config.py`)
 
@@ -95,8 +98,12 @@ Post-operation safety net — runs configurable shell commands after sync/restor
 
 ### 9. UI (`ui.py`)
 
-- Terminal UI components
-- Progress indicators and status displays
+Rich terminal output helpers for consistent formatting across all commands.
+
+- **Consoles**: `console` (stdout) and `err_console` (stderr, red)
+- **Message helpers**: `print_success()` (green), `print_warning()` (yellow), `print_error()` (red/stderr), `print_section()` (bold rule)
+- **Tables**: `file_table()` for ConfigFile lists (path, size, verdict, reason, OS), `snapshot_table()` for SnapshotMeta lists (numbered, with ID, date, trigger, file count, host)
+- **Panels**: `flag_panel()` for sensitive file details (matches with line numbers and redacted previews, AI flag status)
 
 ## Data Flow
 

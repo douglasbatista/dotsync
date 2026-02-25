@@ -82,5 +82,21 @@
   - `HealthCheckFailedError` exception with failed check summary
 - 19 tests covering data model, runner, batch, rollback, and orchestration
 
+### Added (continued)
+- CLI interface (`main.py`)
+  - `init` command with `--repo-path`, `--remote`, `--llm-endpoint` options and dependency checking
+  - `discover` command with `--no-ai` option and interactive resolution of pending files
+  - `sync` command with `--dry-run`, `--no-push`, `--message` — full pipeline orchestration
+  - `restore` command with `--dry-run`, `--no-pull`, `--from-snapshot` — pull + restore or direct snapshot rollback
+  - `rollback` command with interactive snapshot selection and integrity verification
+  - `status` command with config summary, managed files count, and snapshot count
+  - `config` command with `--show` and `--set KEY=VALUE` (validates key names against schema)
+  - `confirm_sensitive_files()` — interactive Include/Exclude/Skip for flagged files
+  - Structured exit codes: 0 (success), 1 (health check failed), 2 (dependency missing), 3 (config not found), 4 (merge conflict), 5 (user aborted)
+- Rich UI helpers (`ui.py`)
+  - `print_success()`, `print_warning()`, `print_error()`, `print_section()` output helpers
+  - `file_table()`, `snapshot_table()`, `flag_panel()` for Rich display
+- 7 tests covering confirmation flow, config command, and error handling exit codes
+
 ### Fixed
 - None

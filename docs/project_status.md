@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Milestone: Health Checks Complete ✅
+## Current Milestone: CLI Interface Complete
 
 ### Completed
 - [x] Project scaffolding with uv
@@ -66,20 +66,30 @@
   - [x] `HealthCheckFailedError` exception
   - [x] 19 tests with full coverage
 
+- [x] CLI interface (`main.py`)
+  - [x] `init` command with `--repo-path`, `--remote`, `--llm-endpoint`
+  - [x] `discover` command with `--no-ai` and interactive resolution
+  - [x] `sync` command with full pipeline orchestration
+  - [x] `restore` command with pull + restore or direct snapshot rollback
+  - [x] `rollback` command with interactive selection and integrity verification
+  - [x] `status` command with config/repo/snapshot summary
+  - [x] `config` command with `--show` and `--set KEY=VALUE`
+  - [x] `confirm_sensitive_files()` — I/E/S interactive confirmation
+  - [x] Structured exit codes (0–5)
+  - [x] 7 tests covering confirmation, config, and error handling
+
+- [x] Rich UI helpers (`ui.py`)
+  - [x] `print_success()`, `print_warning()`, `print_error()`, `print_section()`
+  - [x] `file_table()`, `snapshot_table()`, `flag_panel()`
+
 ### In Progress
 - (none)
 
 ### Pending
-- [ ] UI/progress indicators
-- [ ] `sync` command implementation
-- [ ] `restore` command implementation
-- [ ] `rollback` command implementation
-- [ ] `status` command implementation
 - [ ] Integration tests
 - [ ] End-to-end testing
 
 ## Next Steps
 
-1. Wire up CLI commands (`sync`, `restore`, `rollback`, `status`)
-2. UI/progress indicators
-3. Integration and end-to-end testing
+1. Integration and end-to-end testing
+2. Manual smoke testing of full CLI workflows
