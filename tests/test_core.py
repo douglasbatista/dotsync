@@ -77,6 +77,27 @@ class TestConfig:
                     assert loaded.exclude_patterns == cfg.exclude_patterns
                     assert loaded.include_extra == cfg.include_extra
 
+    def test_config_roundtrip_with_defaults(self, tmp_path: Path) -> None:
+        """Test that saving then loading default config preserves None optionals."""
+        temp_config_dir = tmp_path / ".dotsync"
+        temp_config_file = temp_config_dir / "config.toml"
+
+        with patch("dotsync.config.CONFIG_DIR", temp_config_dir):
+            with patch("dotsync.config.CONFIG_FILE", temp_config_file):
+                cfg = default_config()
+                save_config(cfg)
+                loaded = load_config()
+
+                assert loaded.repo_path == cfg.repo_path
+                assert loaded.remote_url is None
+                assert loaded.gitcrypt_key_path is None
+                assert loaded.llm_endpoint is None
+                assert loaded.llm_model == cfg.llm_model
+                assert loaded.snapshot_keep == cfg.snapshot_keep
+                assert loaded.health_checks == cfg.health_checks
+                assert loaded.exclude_patterns == cfg.exclude_patterns
+                assert loaded.include_extra == cfg.include_extra
+
     def test_config_missing(self) -> None:
         """Test that load_config raises ConfigNotFoundError when file is absent."""
         # Use a non-existent path

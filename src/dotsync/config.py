@@ -58,8 +58,14 @@ def load_config() -> DotSyncConfig:
     if not CONFIG_FILE.exists():
         raise ConfigNotFoundError(f"Configuration file not found: {CONFIG_FILE}")
 
+    _OPTIONAL_FIELDS = {"remote_url", "gitcrypt_key_path", "llm_endpoint"}
+
     with CONFIG_FILE.open("rb") as f:
         data = tomllib.load(f)
+
+    for field in _OPTIONAL_FIELDS:
+        if field in data and data[field] == "":
+            data[field] = None
 
     return DotSyncConfig.model_validate(data)
 
@@ -68,14 +74,14 @@ def _serialize_for_toml(cfg: DotSyncConfig) -> dict:
     """Convert config to TOML-serializable dict.
 
     Path objects are converted to strings since tomli_w doesn't support them.
-    None values are omitted since TOML doesn't support null.
+    None values are written as empty strings since TOML doesn't support null.
     """
     data = cfg.model_dump()
     result: dict = {}
     for key, value in data.items():
         if value is None:
-            continue  # Skip None values - TOML doesn't support null
-        if isinstance(value, Path):
+            result[key] = ""
+        elif isinstance(value, Path):
             result[key] = str(value)
         elif isinstance(value, list):
             result[key] = [str(v) if isinstance(v, Path) else v for v in value]
