@@ -98,5 +98,13 @@
   - `file_table()`, `snapshot_table()`, `flag_panel()` for Rich display
 - 7 tests covering confirmation flow, config command, and error handling exit codes
 
+### Changed (continued)
+- Discovery module: AI classification improvements
+  - `_read_first_lines()` now returns a joined string (was `list[str]`) with a 200-char total cap; appends `"..."` on truncation
+  - Extracted `build_candidate_entry(cf)` helper for per-file payload construction
+  - `classify_with_ai()` now batches candidates into chunks of 20 (`MAX_CANDIDATES_PER_BATCH`) instead of a single API call
+  - Added constants: `MAX_FIRST_LINES`, `MAX_FIRST_LINES_CHARS`, `MAX_CANDIDATES_PER_BATCH`
+- Test suite expanded from 30 to 33 tests in `test_discovery.py`
+
 ### Fixed
 - None

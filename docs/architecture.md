@@ -32,7 +32,8 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 - `HEURISTIC_RULES`: structural rules evaluated in order (home dotfile, XDG config, Windows AppData, config extension) with depth limits
 - `scan_candidates()`: walks `config_dirs()` roots up to depth 5, skips symlinks, files >512 KB, binary files, safety excludes, and prunes scan-excluded dirs
 - `classify_heuristic()`: matches against heuristic rules (first match wins), user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
-- `classify_with_ai()`: sends ambiguous files to LiteLLM proxy, caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error
+- `build_candidate_entry()`: constructs per-file payload dict (path, size, first_lines with 200-char cap, modified_days_ago) for LLM requests
+- `classify_with_ai()`: sends ambiguous files to LiteLLM proxy in batches of 20 (`MAX_CANDIDATES_PER_BATCH`), caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error per batch
 - `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → mark remaining ambiguous as `ask_user`
 
 ### 4. Flagging (`flagging.py`)

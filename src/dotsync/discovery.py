@@ -86,6 +86,9 @@ HEURISTIC_RULES: list[dict] = [
 MAX_DEPTH = 5
 MAX_FILE_SIZE = 512_000
 BINARY_CHECK_BYTES = 8192
+MAX_FIRST_LINES = 5
+MAX_FIRST_LINES_CHARS = 200
+MAX_CANDIDATES_PER_BATCH = 20
 
 CLASSIFICATION_CACHE_FILE = CONFIG_DIR / "classification_cache.json"
 
@@ -364,8 +367,17 @@ def _save_classification_cache(cache: dict[str, dict]) -> None:
     )
 
 
-def _read_first_lines(path: Path, n: int = 5) -> list[str]:
-    """Read first n lines of a file, returning empty list on error."""
+def _read_first_lines(
+    path: Path,
+    n: int = MAX_FIRST_LINES,
+    max_chars: int = MAX_FIRST_LINES_CHARS,
+) -> str:
+    """Read first *n* lines of a file, capped at *max_chars* total characters.
+
+    Returns the joined text (lines separated by ``\\n``).  If the raw text
+    exceeds *max_chars*, it is truncated and ``"..."`` is appended.
+    Returns an empty string on read error.
+    """
     try:
         lines: list[str] = []
         with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -374,9 +386,33 @@ def _read_first_lines(path: Path, n: int = 5) -> list[str]:
                 if not line:
                     break
                 lines.append(line.rstrip("\n"))
-        return lines
+        text = "\n".join(lines)
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        return text
     except OSError:
-        return []
+        return ""
+
+
+def build_candidate_entry(cf: ConfigFile) -> dict:
+    """Build the payload dict for a single candidate file.
+
+    Used by :func:`classify_with_ai` to construct the per-file entry
+    sent to the LLM.
+    """
+    now = datetime.now(tz=timezone.utc)
+    try:
+        mtime = cf.abs_path.stat().st_mtime
+        days_ago = (now - datetime.fromtimestamp(mtime, tz=timezone.utc)).days
+    except OSError:
+        days_ago = -1
+
+    return {
+        "path": str(cf.path),
+        "size_bytes": cf.size_bytes,
+        "first_lines": _read_first_lines(cf.abs_path),
+        "modified_days_ago": days_ago,
+    }
 
 
 def classify_with_ai(
@@ -384,6 +420,9 @@ def classify_with_ai(
     cfg: DotSyncConfig,
 ) -> list[ConfigFile]:
     """Classify unknown candidates using an LLM via LiteLLM proxy.
+
+    Candidates are sent in batches of :data:`MAX_CANDIDATES_PER_BATCH` to
+    avoid context-window overflow.
 
     Args:
         candidates: ConfigFile objects with include=None to classify.
@@ -411,25 +450,6 @@ def classify_with_ai(
     if not to_classify:
         return candidates
 
-    # Build payload
-    now = datetime.now(tz=timezone.utc)
-    items: list[dict] = []
-    for cf in to_classify:
-        try:
-            mtime = cf.abs_path.stat().st_mtime
-            days_ago = (now - datetime.fromtimestamp(mtime, tz=timezone.utc)).days
-        except OSError:
-            days_ago = -1
-
-        items.append(
-            {
-                "path": str(cf.path),
-                "size_bytes": cf.size_bytes,
-                "first_lines": "\n".join(_read_first_lines(cf.abs_path)),
-                "modified_days_ago": days_ago,
-            }
-        )
-
     system_prompt = (
         "You are a dotfile classifier. For each file, respond with a JSON array "
         "of objects with keys 'path', 'verdict', and 'reason'. verdict must be "
@@ -437,40 +457,45 @@ def classify_with_ai(
         "nothing else."
     )
 
-    try:
-        content = chat_completion(
-            endpoint=cfg.llm_endpoint,
-            model=cfg.llm_model,
-            system_prompt=system_prompt,
-            user_message=json.dumps(items),
-        )
-        verdicts_raw = json.loads(content)
+    # Process in batches of MAX_CANDIDATES_PER_BATCH
+    for batch_start in range(0, len(to_classify), MAX_CANDIDATES_PER_BATCH):
+        batch = to_classify[batch_start : batch_start + MAX_CANDIDATES_PER_BATCH]
+        items = [build_candidate_entry(cf) for cf in batch]
 
-        verdict_map: dict[str, str] = {}
-        if isinstance(verdicts_raw, list):
-            for v in verdicts_raw:
-                if isinstance(v, dict) and "path" in v and "verdict" in v:
-                    verdict_map[v["path"]] = v["verdict"]
+        try:
+            content = chat_completion(
+                endpoint=cfg.llm_endpoint,
+                model=cfg.llm_model,
+                system_prompt=system_prompt,
+                user_message=json.dumps(items),
+            )
+            verdicts_raw = json.loads(content)
 
-        for cf in to_classify:
-            key = str(cf.path)
-            verdict = verdict_map.get(key)
-            if verdict == "include":
-                cf.include = True
-                cf.reason = "ai:include"
-            elif verdict == "exclude":
-                cf.include = False
-                cf.reason = "ai:exclude"
-            else:
+            verdict_map: dict[str, str] = {}
+            if isinstance(verdicts_raw, list):
+                for v in verdicts_raw:
+                    if isinstance(v, dict) and "path" in v and "verdict" in v:
+                        verdict_map[v["path"]] = v["verdict"]
+
+            for cf in batch:
+                key = str(cf.path)
+                verdict = verdict_map.get(key)
+                if verdict == "include":
+                    cf.include = True
+                    cf.reason = "ai:include"
+                elif verdict == "exclude":
+                    cf.include = False
+                    cf.reason = "ai:exclude"
+                else:
+                    cf.include = None
+                    cf.reason = "ask_user"
+
+                cache[key] = {"include": cf.include, "reason": cf.reason}
+
+        except (LLMError, json.JSONDecodeError, TypeError):
+            for cf in batch:
                 cf.include = None
                 cf.reason = "ask_user"
-
-            cache[key] = {"include": cf.include, "reason": cf.reason}
-
-    except (LLMError, json.JSONDecodeError, TypeError):
-        for cf in to_classify:
-            cf.include = None
-            cf.reason = "ask_user"
 
     _save_classification_cache(cache)
     return candidates

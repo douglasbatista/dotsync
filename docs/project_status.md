@@ -15,9 +15,10 @@
   - [x] `ConfigFile` Pydantic model
   - [x] `scan_candidates()` with depth/size/binary/safety-exclude/scan-exclude filtering
   - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension)
-  - [x] `classify_with_ai()` with LiteLLM proxy and persistent cache
+  - [x] `classify_with_ai()` with LiteLLM proxy, persistent cache, and batch chunking (max 20 per call)
+  - [x] `build_candidate_entry()` helper with 200-char truncation on first_lines
   - [x] `discover()` orchestrator
-  - [x] 35 tests with full acceptance criteria coverage
+  - [x] 33 tests with full acceptance criteria coverage
 - [x] Sensitive data flagging (`flagging.py`)
   - [x] 11 compiled regex patterns for secret detection
   - [x] `NEVER_INCLUDE` defense-in-depth blocklist

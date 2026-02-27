@@ -14,6 +14,7 @@ from dotsync.discovery import (
     ConfigFile,
     _load_classification_cache,
     _save_classification_cache,
+    build_candidate_entry,
     classify_heuristic,
     classify_with_ai,
     discover,
@@ -347,6 +348,71 @@ class TestClassifyWithAI:
         mock_chat.assert_not_called()
         assert result[0].include is True
         assert result[0].reason == "ai:include"
+
+    def test_build_candidate_entry_truncates_first_lines(self, tmp_path: Path) -> None:
+        """first_lines should contain at most MAX_FIRST_LINES (5) lines."""
+        content = "\n".join(f"line {i}" for i in range(20)) + "\n"
+        f = _make_file(tmp_path, "many_lines.conf", content)
+        cf = ConfigFile(
+            path=Path("many_lines.conf"),
+            abs_path=f,
+            size_bytes=len(content),
+            include=None,
+            reason="ambiguous",
+        )
+
+        entry = build_candidate_entry(cf)
+        lines = entry["first_lines"].split("\n")
+        assert len(lines) <= 5
+
+    def test_build_candidate_entry_truncates_long_lines(self, tmp_path: Path) -> None:
+        """first_lines should be at most 200 chars and end with '...' if truncated."""
+        content = "x" * 500 + "\n"
+        f = _make_file(tmp_path, "long_line.conf", content)
+        cf = ConfigFile(
+            path=Path("long_line.conf"),
+            abs_path=f,
+            size_bytes=len(content),
+            include=None,
+            reason="ambiguous",
+        )
+
+        entry = build_candidate_entry(cf)
+        assert len(entry["first_lines"]) <= 200 + len("...")
+        assert entry["first_lines"].endswith("...")
+
+    def test_classify_with_ai_chunks_large_input(self, tmp_path: Path) -> None:
+        """45 candidates should result in exactly 3 chat_completion calls (20+20+5)."""
+        cfg = _default_cfg(llm_endpoint="http://localhost:8000")
+        candidates: list[ConfigFile] = []
+        for i in range(45):
+            rel = f"file_{i}.conf"
+            f = _make_file(tmp_path, rel, f"content {i}")
+            candidates.append(
+                ConfigFile(
+                    path=Path(rel),
+                    abs_path=f,
+                    size_bytes=10,
+                    include=None,
+                    reason="ambiguous",
+                )
+            )
+
+        def fake_response(**kwargs: object) -> str:
+            items = json.loads(str(kwargs.get("user_message", "[]")))
+            return json.dumps(
+                [{"path": item["path"], "verdict": "include"} for item in items]
+            )
+
+        with (
+            patch(
+                "dotsync.discovery.chat_completion", side_effect=fake_response
+            ) as mock_chat,
+            patch("dotsync.discovery._load_classification_cache", return_value={}),
+            patch("dotsync.discovery._save_classification_cache"),
+        ):
+            classify_with_ai(candidates, cfg)
+            assert mock_chat.call_count == 3
 
     def test_ai_classify_saves_to_cache(self, tmp_path: Path) -> None:
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
