@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import typer
+from rich.live import Live
 from typing_extensions import Annotated
 
 from dotsync.logging_setup import setup_logging
+
+if TYPE_CHECKING:
+    from dotsync.config import DotSyncConfig
 
 app = typer.Typer(name="dotsync", help="Backup, sync, and encrypt dotfiles across workstations.")
 
@@ -85,6 +90,57 @@ def confirm_sensitive_files(flag_results: list) -> list:
         # "S" or anything else → leave as-is
 
     return flag_results
+
+
+# ---------------------------------------------------------------------------
+# Live scan progress
+# ---------------------------------------------------------------------------
+
+
+def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
+    """Run discover() with a live progress display.
+
+    Args:
+        cfg: DotSyncConfig instance.
+
+    Returns:
+        List of ConfigFile results from discover().
+    """
+    from dotsync.discovery import ScanEvent, discover as run_discover
+    from dotsync.ui import ScanStats, console, make_scan_display
+
+    stats = ScanStats()
+    accepted_paths: list[str] = []
+
+    def on_event(event: ScanEvent) -> None:
+        t = event["type"]
+        if t == "dir_enter":
+            stats.dirs_entered += 1
+            stats.current_dir = event["path"] or ""
+        elif t == "dir_pruned":
+            stats.dirs_pruned += 1
+        elif t == "file_accepted":
+            stats.files_accepted += 1
+            accepted_paths.append(event["path"] or "")
+        elif t == "file_rejected":
+            stats.files_rejected += 1
+        elif t == "phase_start":
+            stats.phase = event["reason"] or ""
+        elif t == "phase_done" and event["reason"] == "scan":
+            # After scan phase, log the full list of accepted files
+            for p in accepted_paths:
+                logger.debug("accepted: %s", p)
+        elif t == "ai_batch":
+            stats.ai_batches_done += 1
+        # Log pruned/rejected at DEBUG for --verbose visibility
+        if t in ("dir_pruned", "file_rejected"):
+            logger.debug("%s: %s (%s)", t, event["path"], event["reason"])
+        live.update(make_scan_display(stats))
+
+    with Live(make_scan_display(stats), console=console, refresh_per_second=8) as live:
+        files = run_discover(cfg, progress=on_event)
+
+    return files
 
 
 # ---------------------------------------------------------------------------
@@ -169,10 +225,7 @@ def discover(
     if no_ai:
         cfg.llm_endpoint = None
 
-    with console.status("Scanning for configuration files..."):
-        from dotsync.discovery import discover as run_discover
-
-        files = run_discover(cfg)
+    files = _run_discover_with_progress(cfg)
 
     print_section("Discovery Results")
 
@@ -214,7 +267,6 @@ def sync(
 ) -> None:
     """Sync configuration files to the repository."""
     from dotsync.config import ConfigNotFoundError, load_config
-    from dotsync.discovery import discover as run_discover
     from dotsync.flagging import enforce_never_include, flag_all
     from dotsync.git_ops import (
         NoRemoteConfiguredError,
@@ -239,8 +291,7 @@ def sync(
 
     # 1. Discover & flag
     print_section("Discovery")
-    with console.status("Scanning for configuration files..."):
-        files = run_discover(cfg)
+    files = _run_discover_with_progress(cfg)
     enforce_never_include(files)
 
     with console.status("Checking for sensitive data..."):

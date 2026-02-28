@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -15,6 +16,52 @@ if TYPE_CHECKING:
 
 console = Console()
 err_console = Console(stderr=True, style="bold red")
+
+
+@dataclass
+class ScanStats:
+    """Accumulates scan event counts for live progress display."""
+
+    dirs_entered: int = 0
+    dirs_pruned: int = 0
+    files_accepted: int = 0
+    files_rejected: int = 0
+    current_dir: str = ""
+    phase: str = ""
+    ai_batches_done: int = 0
+
+
+def make_scan_display(stats: ScanStats) -> Table:
+    """Build a compact Rich table showing live scan statistics.
+
+    Args:
+        stats: Current scan statistics.
+
+    Returns:
+        A Rich Table summarising the scan state.
+    """
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="bold cyan", no_wrap=True)
+    table.add_column("Value")
+
+    phase_label = stats.phase or "starting"
+    table.add_row("Phase", phase_label)
+    table.add_row("Dirs scanned", str(stats.dirs_entered))
+    table.add_row("Dirs pruned", str(stats.dirs_pruned))
+    table.add_row("Files accepted", str(stats.files_accepted))
+    table.add_row("Files rejected", str(stats.files_rejected))
+
+    if stats.ai_batches_done:
+        table.add_row("AI batches", str(stats.ai_batches_done))
+
+    if stats.current_dir:
+        # Truncate long paths for display
+        display_dir = stats.current_dir
+        if len(display_dir) > 60:
+            display_dir = "..." + display_dir[-57:]
+        table.add_row("Current dir", f"[dim]{display_dir}[/dim]")
+
+    return table
 
 
 def print_success(msg: str) -> None:

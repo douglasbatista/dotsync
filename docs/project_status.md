@@ -13,12 +13,23 @@
 - [x] Documentation structure established
 - [x] File discovery and classification (`discovery.py`)
   - [x] `ConfigFile` Pydantic model
-  - [x] `scan_candidates()` with depth/size/binary/safety-exclude/scan-exclude filtering
+  - [x] `scan_candidates()` with `os.scandir()` + `_scan_dir()` recursive scanner, parallel root scanning via `ThreadPoolExecutor`, per-root max depth, two-phase filtering: subtree pruning (`PRUNE_DIRS` + `_PRUNE_PREFIXES`) and `_prefilter_file()` (safety excludes, `BLOCKED_EXTENSIONS`, `BLOCKED_FILENAMES`, size >50 KB, 512-byte binary detection)
+  - [x] `HOME_SCAN_DEPTH = 1` — `$HOME` scanned shallowly (direct children only), 21 `KNOWN_CONFIG_SUBDIRS` get deep scan (XDG, shell, editors, dev tools)
+  - [x] `config_dirs()` returns `list[tuple[Path, int]]` with per-root max depth, existence-checked subdirs, `XDG_CONFIG_HOME` support
   - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension)
   - [x] `classify_with_ai()` with LiteLLM proxy, persistent cache, and batch chunking (max 20 per call)
   - [x] `build_candidate_entry()` helper with 200-char truncation on first_lines
   - [x] `discover()` orchestrator
-  - [x] 33 tests with full acceptance criteria coverage
+  - [x] `ScanEvent` TypedDict and `ProgressCallback` for real-time progress reporting
+  - [x] Progress events: `root_start`/`root_done`, `dir_enter`/`dir_pruned`, `file_accepted`/`file_rejected`, `phase_start`/`phase_done`, `ai_batch`
+  - [x] `BLOCKED_FILENAME_PATTERNS` with regex detection for UUID (incl. dot-prefix), hex (incl. @version), numeric, hex-with-dots, trailing timestamp filenames
+  - [x] `_is_generated_filename()` wired into `_prefilter_file()` pipeline (checks both stem and name)
+  - [x] `_should_prune_dir()` prunes directories with generated names (UUID, hex, numeric) via `_is_generated_filename()`
+  - [x] AI system prompt uses environment-vs-infrastructure framing (not authorship)
+  - [x] `BLOCKED_EXTENSIONS`: `.md`, `.rst`, `.sh`, `.bash`, `.txt`, `.orig`, `.bak`, `.backup`, `.tmp`, `.jsonl`, `.po`, `.pot`, `.zsh-theme`, `.theme`, `.info`
+  - [x] `BLOCKED_FILENAMES`: Cargo metadata, license/legal, docs, runtime state markers (`.lock`, `.highwatermark`, `.pid`), build files (`Makefile`, `GNUmakefile`, `build.info`, `bindgen`)
+  - [x] `PRUNE_DIRS` expanded with `registry`, `bin`, `extensions`, `file-history`, `backups`, `todos`, `plugins`, `themes`, `custom`, `l10n`/`locales`/`locale`, `licenses`, `projects`, `tasks`, `conversations`, `events`, `subagents`, `language`, `gitstatus`, `.github`, `.gitlab`
+  - [x] 110 tests + 2 perf tests with full acceptance criteria coverage
 - [x] Sensitive data flagging (`flagging.py`)
   - [x] 11 compiled regex patterns for secret detection
   - [x] `NEVER_INCLUDE` defense-in-depth blocklist
@@ -82,6 +93,11 @@
 - [x] Rich UI helpers (`ui.py`)
   - [x] `print_success()`, `print_warning()`, `print_error()`, `print_section()`
   - [x] `file_table()`, `snapshot_table()`, `flag_panel()`
+  - [x] `ScanStats` dataclass and `make_scan_display()` for live scan progress
+  - [x] Live progress wired into `discover` and `sync` commands via `_run_discover_with_progress()`
+  - [x] `--verbose` surfaces `dir_pruned`/`file_rejected` events at DEBUG level
+  - [x] `--verbose` logs full list of accepted files after scan phase ends
+  - [x] 11 tests covering CLI (up from 7)
 
 ### In Progress
 - (none)

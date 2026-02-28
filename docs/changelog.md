@@ -106,5 +106,79 @@
   - Added constants: `MAX_FIRST_LINES`, `MAX_FIRST_LINES_CHARS`, `MAX_CANDIDATES_PER_BATCH`
 - Test suite expanded from 30 to 33 tests in `test_discovery.py`
 
+### Changed (continued)
+- Discovery module: two-phase filtering refactor with performance-first scanner
+  - Replaced `os.walk()` with `os.scandir()` + manual recursion via `_scan_dir()` for efficient `DirEntry` stat reuse
+  - Parallel root scanning via `ThreadPoolExecutor` (one thread per scan root)
+  - Replaced `SCAN_EXCLUDES` with `PRUNE_DIRS` (~33 directory names, matched by name) + `_PRUNE_PREFIXES` (`.local/share/`, `.local/lib/`)
+  - Added `BLOCKED_EXTENSIONS` (~48 file extensions) and `BLOCKED_FILENAMES` (7 exact names + glob patterns) for file-level pre-filtering
+  - Added `_prefilter_file()` consolidating all file-level checks ordered cheapest-first
+  - Reduced `MAX_FILE_SIZE` from 512 KB to 50 KB, `BINARY_CHECK_BYTES` from 8192 to 512
+  - Safety excludes now prune at directory level in addition to file level
+  - `PermissionError` on inaccessible directories silently skipped
+  - Extra paths bypass prune dirs and blocked lists but not safety excludes (unchanged behavior)
+  - Added `ScanEvent` TypedDict, `ProgressCallback` type alias, and `_emit()` helper for real-time progress reporting
+  - `scan_candidates()`, `classify_with_ai()`, and `discover()` accept optional `progress` callback
+  - Scanner emits `root_start`/`root_done`, `dir_enter`/`dir_pruned`, `file_accepted`/`file_rejected` events
+  - `discover()` emits `phase_start`/`phase_done` events for scan, heuristic, and ai_triage phases
+  - `classify_with_ai()` emits `ai_batch` events per batch
+  - Test suite expanded from 33 to 57 tests in `test_discovery.py`
+
+### Added (continued)
+- Live scan progress display in CLI
+  - `ScanStats` dataclass and `make_scan_display()` Rich table helper in `ui.py`
+  - `_run_discover_with_progress()` helper in `main.py` using `Rich.Live` for real-time scan statistics
+  - `discover` and `sync` commands now show live progress (dirs scanned, files accepted/rejected, current directory, phase)
+  - `--verbose` flag now surfaces `dir_pruned` and `file_rejected` events at DEBUG level
+  - `--verbose` logs the full list of accepted files after scan phase completes
+  - 4 new tests covering progress callback wiring and verbose logging
+
+### Added (continued)
+- Generated filename detection in discovery scanner
+  - `BLOCKED_FILENAME_PATTERNS`: compiled regexes for UUID, hex (16+ chars), numeric, and hex-with-dots filenames
+  - `_is_generated_filename()` function wired into `_prefilter_file()` (runs after blocked extension/filename, before size check)
+  - `.md` and `.rst` added to `BLOCKED_EXTENSIONS` (documentation files are never config)
+  - `@pytest.mark.perf` marker registered in `pyproject.toml`, excluded from default test runs
+
+### Changed (continued)
+- Discovery constants expanded for broader noise filtering
+  - `PRUNE_DIRS` expanded: `registry` (Cargo), `bin`/`extensions` (VS Code server), `file-history`/`backups`/`todos` (app state), `plugins` (shell plugin code), `l10n`/`locales`/`locale` (i18n), `licenses`
+  - `BLOCKED_EXTENSIONS` expanded: `.sh`/`.bash` (shell scripts), `.txt` (plain text), `.orig`/`.bak`/`.backup`/`.tmp` (backup/temp files)
+  - `BLOCKED_FILENAMES` expanded: `.cargo-ok`/`.cargo_vcs_info.json` (Cargo metadata), `LICENSE`/`LICENSE-MIT`/`LICENSE-APACHE`/`LICENSE-BSD`/`COPYING`/`NOTICE`/`AUTHORS`/`CONTRIBUTORS` (license/legal), `README`/`CHANGELOG`/`CHANGES`/`HISTORY` (docs)
+  - `BLOCKED_FILENAME_PATTERNS` updated: dot-prefixed UUID support, hex with `@version` suffix, trailing Unix timestamp (`\.\d{10,}$`)
+  - `_is_generated_filename()` now checks both `stem` and `name` (was stem only) using `search()` (was `match()`)
+  - Test suite expanded from 69 to 86 tests in `test_discovery.py` (+ 2 perf tests)
+
+### Changed (continued)
+- AI system prompt rewritten with **environment vs infrastructure** framing (replaces ownership-based version)
+  - Old question: "Would this user want to replicate this file on another machine?"
+  - New question: "Is this file part of the user's computing environment, or internal infrastructure that the tool recreates on reinstall?"
+  - Removes authorship as a criterion — default configs and pinned versions count as environment
+  - INCLUDE trigger: "reflects a choice" — installed plugins, selected theme, registry mirror, auth context
+  - EXCLUDE trigger: "reinstalling the tool would produce this file with identical content"
+  - Credentials/private keys explicitly declared out of scope (handled separately by safety excludes)
+
+### Changed (continued)
+- `_should_prune_dir()` now prunes directories with generated names (UUID, hex, numeric) via `_is_generated_filename()`
+  - Prevents descent into directories like `.f9c91a88-3095-44a3-bbb5-011673bd7cc9/`
+  - Reuses existing `_is_generated_filename()` and `BLOCKED_FILENAME_PATTERNS` — no new regexes
+  - Test suite expanded from 108 to 110 tests in `test_discovery.py` (+ 2 perf tests)
+
+### Changed (continued)
+- `$HOME` shallow scan architecture
+  - `platform_utils.config_dirs()` now returns `list[tuple[Path, int]]` — each root has its own max scan depth
+  - `HOME_SCAN_DEPTH = 1` limits `$HOME` to direct children only (dotfiles), preventing descent into user repos/projects
+  - `KNOWN_CONFIG_SUBDIRS` expanded to 21 entries: XDG (`.config`, `.local`), shell (`.oh-my-zsh`, `.zsh`, `.bash_it`), editors (`.vim`, `.nvim`, `.emacs.d`, `.nano`), dev tools (`.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`, `.cargo`, `.rustup`, `.npm`, `.nvm`, `.pyenv`, `.rbenv`), dotfiles repo (`.git`)
+  - Known subdirs only added as roots if they exist on disk
+  - `XDG_CONFIG_HOME` respected when set and different from `~/.config`
+  - Windows AppData roots use depth 4 (matching heuristic rule max_depth)
+  - `scan_candidates()` updated to unpack `(Path, max_depth)` tuples from `config_dirs()`
+- Discovery constants expanded for deeper noise filtering
+  - `PRUNE_DIRS` expanded: `themes`/`custom` (shell themes), `projects`/`tasks`/`conversations`/`events`/`subagents` (AI agent state), `language`/`gitstatus` (shell prompt internals), `.github`/`.gitlab` (repository metadata)
+  - `BLOCKED_EXTENSIONS` expanded: `.jsonl` (structured logs), `.po`/`.pot` (gettext), `.zsh-theme`/`.theme` (shell themes), `.info` (metadata)
+  - `BLOCKED_FILENAMES` rewritten: removed `*.log`/`*.pid` glob patterns (handled by BLOCKED_EXTENSIONS), added `.lock`/`.highwatermark`/`.pid` (runtime state markers), `Makefile`/`makefile`/`GNUmakefile`/`build.info`/`bindgen` (build files)
+  - Removed `_BLOCKED_FILENAME_GLOBS` mechanism (no longer needed — all entries are exact matches)
+  - Test suite expanded from 86 to 108 tests in `test_discovery.py` (+ 2 perf tests)
+
 ### Fixed
 - None

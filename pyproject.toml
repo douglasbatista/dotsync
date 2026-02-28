@@ -31,5 +31,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotsync"]
 
+[tool.pytest.ini_options]
+addopts = "-m 'not perf'"
+markers = [
+    "perf: performance benchmarks (deselected by default, run with: pytest -m perf)",
+]
+
 [tool.uv]
 package = true

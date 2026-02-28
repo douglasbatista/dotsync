@@ -157,3 +157,144 @@ class TestErrorHandling:
         assert result.exit_code == EXIT_CODES["dependency_missing"]
 
 
+# ---------------------------------------------------------------------------
+# TestDiscoverProgress
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverProgress:
+    """Tests for scan progress display wiring."""
+
+    @patch("dotsync.config.load_config")
+    def test_discover_passes_progress_callback(self, mock_load: MagicMock) -> None:
+        """discover command should call discover() with a callable progress kwarg."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        with patch("dotsync.discovery.discover") as mock_discover:
+            mock_discover.return_value = []
+            result = runner.invoke(app, ["discover", "--no-ai"])
+
+        assert result.exit_code == 0
+        mock_discover.assert_called_once()
+        _, kwargs = mock_discover.call_args
+        assert "progress" in kwargs
+        assert callable(kwargs["progress"])
+
+    @patch("dotsync.config.load_config")
+    def test_sync_passes_progress_callback(self, mock_load: MagicMock) -> None:
+        """sync command should call discover() with a callable progress kwarg."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        with (
+            patch("dotsync.discovery.discover") as mock_discover,
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.flagging.enforce_never_include", return_value=[]),
+            patch("dotsync.git_ops.init_repo") as mock_repo,
+            patch("dotsync.git_ops.load_manifest", return_value=[]),
+            patch("dotsync.sync.register_new_files", return_value=[]),
+            patch("dotsync.sync.plan_sync", return_value=[]),
+            patch("dotsync.sync.execute_sync", return_value=[]),
+            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
+            patch("dotsync.platform_utils.current_os", return_value="linux"),
+        ):
+            mock_discover.return_value = []
+            mock_repo.return_value = MagicMock()
+            result = runner.invoke(app, ["sync", "--dry-run"])
+
+        assert result.exit_code == 0
+        mock_discover.assert_called_once()
+        _, kwargs = mock_discover.call_args
+        assert "progress" in kwargs
+        assert callable(kwargs["progress"])
+
+    @patch("dotsync.config.load_config")
+    def test_discover_verbose_logs_pruned_dirs(self, mock_load: MagicMock) -> None:
+        """With --verbose, dir_pruned and file_rejected events should be logged at DEBUG."""
+        from dotsync.discovery import ScanEvent
+
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        captured_callback: list = []
+
+        def fake_discover(cfg: object, progress: object = None) -> list:
+            captured_callback.append(progress)
+            # Simulate events
+            if callable(progress):
+                progress(ScanEvent(
+                    type="dir_pruned",
+                    path="/home/test/.cache",
+                    reason="dir_name in PRUNE_DIRS",
+                    count=None,
+                ))
+                progress(ScanEvent(
+                    type="file_rejected",
+                    path="/home/test/photo.png",
+                    reason="blocked extension: .png",
+                    count=None,
+                ))
+            return []
+
+        with patch("dotsync.discovery.discover", side_effect=fake_discover):
+            with patch("dotsync.main.logger") as mock_logger:
+                result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
+
+        assert result.exit_code == 0
+        # Verify debug logs were emitted for pruned/rejected events
+        debug_calls = mock_logger.debug.call_args_list
+        assert len(debug_calls) >= 2
+        # First call should be dir_pruned
+        assert "dir_pruned" in str(debug_calls[0])
+        # Second call should be file_rejected
+        assert "file_rejected" in str(debug_calls[1])
+
+    @patch("dotsync.config.load_config")
+    def test_discover_verbose_logs_accepted_files_after_scan(self, mock_load: MagicMock) -> None:
+        """After scan phase, --verbose should log all accepted file paths."""
+        from dotsync.discovery import ScanEvent
+
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        def fake_discover(cfg: object, progress: object = None) -> list:
+            if callable(progress):
+                progress(ScanEvent(
+                    type="phase_start",
+                    path=None,
+                    reason="scan",
+                    count=None,
+                ))
+                progress(ScanEvent(
+                    type="file_accepted",
+                    path="/home/test/.bashrc",
+                    reason=None,
+                    count=None,
+                ))
+                progress(ScanEvent(
+                    type="file_accepted",
+                    path="/home/test/.config/nvim/init.lua",
+                    reason=None,
+                    count=None,
+                ))
+                progress(ScanEvent(
+                    type="phase_done",
+                    path=None,
+                    reason="scan",
+                    count=2,
+                ))
+            return []
+
+        with patch("dotsync.discovery.discover", side_effect=fake_discover):
+            with patch("dotsync.main.logger") as mock_logger:
+                result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
+
+        assert result.exit_code == 0
+        debug_calls = mock_logger.debug.call_args_list
+        accepted_logs = [c for c in debug_calls if "accepted:" in str(c)]
+        assert len(accepted_logs) == 2
+        assert "/home/test/.bashrc" in str(accepted_logs[0])
+        assert "/home/test/.config/nvim/init.lua" in str(accepted_logs[1])
+
+

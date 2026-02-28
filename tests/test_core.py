@@ -173,12 +173,17 @@ class TestPlatformUtils:
         assert home.is_dir()
 
     def test_config_dirs_all_exist(self) -> None:
-        """Test that config_dirs returns existing directories (filtered)."""
+        """Test that config_dirs returns (Path, max_depth) tuples."""
         dirs = config_dirs()
         assert len(dirs) > 0
 
+        # Each entry is a (Path, int) tuple
+        for path, depth in dirs:
+            assert isinstance(path, Path)
+            assert isinstance(depth, int)
+
         # Filter to existing directories only
-        existing_dirs = [d for d in dirs if d.exists()]
+        existing_dirs = [(d, depth) for d, depth in dirs if d.exists()]
         assert len(existing_dirs) > 0
 
     def test_is_wsl_on_non_wsl(self) -> None:
