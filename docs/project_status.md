@@ -12,7 +12,7 @@
 - [x] Core module structure created
 - [x] Documentation structure established
 - [x] File discovery and classification (`discovery.py`)
-  - [x] `ConfigFile` Pydantic model
+  - [x] `ConfigFile` Pydantic model (includes `sensitive: bool` field for flagging persistence)
   - [x] `scan_candidates()` with `os.scandir()` + `_scan_dir()` recursive scanner, parallel root scanning via `ThreadPoolExecutor`, per-root max depth, two-phase filtering: subtree pruning (`PRUNE_DIRS` + `_PRUNE_PREFIXES`) and `_prefilter_file()` (safety excludes, `BLOCKED_EXTENSIONS`, `BLOCKED_FILENAMES`, size >50 KB, 512-byte binary detection)
   - [x] `HOME_SCAN_DEPTH = 1` — `$HOME` scanned shallowly (direct children only), 21 `KNOWN_CONFIG_SUBDIRS` get deep scan (XDG, shell, editors, dev tools)
   - [x] `config_dirs()` returns `list[tuple[Path, int]]` with per-root max depth, existence-checked subdirs, `XDG_CONFIG_HOME` support
@@ -53,9 +53,9 @@
   - [x] `transform_paths()` — cross-platform path transformation with URL protection
   - [x] `SyncAction` / `plan_sync()` / `execute_sync()` — home → repo sync
   - [x] `RestoreAction` / `plan_restore()` / `execute_restore()` — repo → home restore
-  - [x] `register_new_files()` — new file registration
+  - [x] `register_new_files()` — new file registration (propagates `ConfigFile.sensitive` → `ManifestEntry.sensitive_flagged`)
   - [x] `Conflict` / `detect_conflicts()` — mtime-based conflict detection
-  - [x] 24 tests with full coverage
+  - [x] 26 tests with full coverage
 
 - [x] Snapshot & rollback (`snapshot.py`)
   - [x] `SnapshotMeta` dataclass and `SnapshotNotFoundError`
@@ -87,8 +87,10 @@
   - [x] `status` command with config/repo/snapshot summary
   - [x] `config` command with `--show` and `--set KEY=VALUE`
   - [x] `confirm_sensitive_files()` — I/E/S interactive confirmation
+  - [x] `_mark_sensitive()` — post-confirmation helper that sets `ConfigFile.sensitive=True` for files with detections
+  - [x] `_manifest_to_config_files()` propagates `sensitive_flagged` → `sensitive` for round-trip consistency
   - [x] Structured exit codes (0–5)
-  - [x] 7 tests covering confirmation, config, and error handling
+  - [x] 11 tests covering confirmation, mark_sensitive, config, and error handling
 
 - [x] Rich UI helpers (`ui.py`)
   - [x] `print_success()`, `print_warning()`, `print_error()`, `print_section()`

@@ -12,6 +12,8 @@ from typing_extensions import Annotated
 from dotsync.logging_setup import setup_logging
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from dotsync.config import DotSyncConfig
 
 app = typer.Typer(name="dotsync", help="Backup, sync, and encrypt dotfiles across workstations.")
@@ -90,6 +92,22 @@ def confirm_sensitive_files(flag_results: list) -> list:
         # "S" or anything else → leave as-is
 
     return flag_results
+
+
+def _mark_sensitive(flag_results: list) -> None:
+    """Mark ConfigFiles as sensitive based on flagging results.
+
+    After ``confirm_sensitive_files()`` resolves interactive prompts, any
+    file that had actual detections (regex matches or AI-flagged) and was
+    confirmed for inclusion (``requires_confirmation is False``) is marked
+    ``sensitive=True``.
+
+    Args:
+        flag_results: FlagResult objects (already confirmed).
+    """
+    for fr in flag_results:
+        if (fr.matches or fr.ai_flagged) and not fr.requires_confirmation:
+            fr.config_file.sensitive = True
 
 
 # ---------------------------------------------------------------------------
@@ -214,9 +232,13 @@ def init(
 def discover(
     no_ai: Annotated[bool, typer.Option("--no-ai", help="Skip AI classification")] = False,
 ) -> None:
-    """Discover configuration files on this machine."""
+    """Discover, flag, and register configuration files into the manifest."""
     from dotsync.config import ConfigNotFoundError, load_config
-    from dotsync.ui import console, file_table, print_error, print_section, print_success
+    from dotsync.flagging import enforce_never_include, flag_all
+    from dotsync.git_ops import init_repo, load_manifest
+    from dotsync.platform_utils import home_dir
+    from dotsync.sync import register_new_files
+    from dotsync.ui import console, file_table, print_error, print_section, print_success, print_warning
 
     try:
         cfg = load_config()
@@ -227,6 +249,7 @@ def discover(
     if no_ai:
         cfg.llm_endpoint = None
 
+    # 1. Scan & classify
     files = _run_discover_with_progress(cfg)
 
     print_section("Discovery Results")
@@ -255,10 +278,85 @@ def discover(
                 f.include = False
                 f.reason = "user_excluded"
 
-    print_success(
-        f"Discovery complete: {len(included)} included, {len(excluded)} excluded, "
-        f"{len(pending)} resolved interactively"
+    # 2. Enforce never-include blocklist
+    enforce_never_include(files)
+
+    # 3. Flag sensitive data
+    included_files = [f for f in files if f.include is True]
+    with console.status("Checking for sensitive data..."):
+        flag_results = flag_all(included_files, cfg)
+
+    # 4. Interactive confirmation for flagged files
+    confirm_sensitive_files(flag_results)
+    _mark_sensitive(flag_results)
+
+    # 5. Load manifest to identify already-tracked files
+    manifest = load_manifest(cfg.repo_path)
+    tracked_paths = {e.relative_path for e in manifest}
+    to_register = [
+        f for f in files
+        if f.include is True and str(f.path) not in tracked_paths
+    ]
+    already_tracked = [
+        f for f in files
+        if f.include is True and str(f.path) in tracked_paths
+    ]
+    excluded_final = [f for f in files if f.include is not True]
+
+    # 6. Enhanced summary
+    print_section("Summary")
+    console.print(
+        f"  [green]{len(to_register)}[/green] file(s) to register, "
+        f"[dim]{len(already_tracked)}[/dim] already tracked, "
+        f"[red]{len(excluded_final)}[/red] excluded"
     )
+
+    # 7. Register new files
+    if not to_register:
+        print_success("Nothing new to register")
+        return
+
+    if not typer.confirm(f"Register {len(to_register)} new file(s) into manifest?"):
+        print_warning("Registration cancelled")
+        raise typer.Exit(code=EXIT_CODES["user_aborted"])
+
+    home = home_dir()
+    init_repo(cfg)
+    new_entries = register_new_files(to_register, flag_results, cfg.repo_path, home, cfg)
+
+    print_success(f"Registered {len(new_entries)} file(s) into manifest")
+
+
+def _manifest_to_config_files(entries: list, home: Path) -> list:
+    """Convert ManifestEntry objects to ConfigFile objects for flagging.
+
+    Args:
+        entries: ManifestEntry objects from the manifest.
+        home: Home directory path.
+
+    Returns:
+        List of ConfigFile objects.
+    """
+    from pathlib import Path
+
+    from dotsync.discovery import ConfigFile
+
+    result: list[ConfigFile] = []
+    for e in entries:
+        abs_path = home / e.relative_path
+        size = abs_path.stat().st_size if abs_path.exists() else 0
+        result.append(
+            ConfigFile(
+                path=Path(e.relative_path),
+                abs_path=abs_path,
+                size_bytes=size,
+                include=True,
+                sensitive=e.sensitive_flagged,
+                reason="manifest",
+                os_profile=e.os_profile,
+            )
+        )
+    return result
 
 
 @app.command()
@@ -267,9 +365,9 @@ def sync(
     no_push: Annotated[bool, typer.Option("--no-push", help="Commit but do not push")] = False,
     message: Annotated[str, typer.Option("--message", "-m", help="Custom commit message")] = "dotsync: sync",
 ) -> None:
-    """Sync configuration files to the repository."""
+    """Sync manifest files to the repository."""
     from dotsync.config import ConfigNotFoundError, load_config
-    from dotsync.flagging import enforce_never_include, flag_all
+    from dotsync.flagging import flag_all
     from dotsync.git_ops import (
         NoRemoteConfiguredError,
         commit_and_push,
@@ -279,8 +377,8 @@ def sync(
     from dotsync.health import HealthCheckFailedError, post_operation_checks
     from dotsync.platform_utils import current_os, home_dir
     from dotsync.snapshot import create_snapshot
-    from dotsync.sync import execute_sync, plan_sync, register_new_files
-    from dotsync.ui import console, print_error, print_section, print_success, print_warning
+    from dotsync.sync import execute_sync, plan_sync
+    from dotsync.ui import action_table, console, print_error, print_section, print_success, print_warning
 
     try:
         cfg = load_config()
@@ -291,76 +389,80 @@ def sync(
     home = home_dir()
     os_name = current_os()
 
-    # 1. Discover & flag
-    print_section("Discovery")
-    files = _run_discover_with_progress(cfg)
-    enforce_never_include(files)
+    # 1. Load manifest — must have files already registered via discover
+    manifest = load_manifest(cfg.repo_path)
+    if not manifest:
+        print_warning("Manifest is empty — run 'dotsync discover' first to register files.")
+        raise typer.Exit(code=EXIT_CODES["user_aborted"])
 
+    # 2. Flag manifest entries for sensitive data
+    config_files = _manifest_to_config_files(manifest, home)
     with console.status("Checking for sensitive data..."):
-        flag_results = flag_all(files, cfg)
+        flag_results = flag_all(config_files, cfg)
 
     confirm_sensitive_files(flag_results)
+    _mark_sensitive(flag_results)
 
-    # 2. Snapshot before sync
+    # 3. Snapshot before sync
     repo = init_repo(cfg)
-    manifest = load_manifest(cfg.repo_path)
 
-    if manifest:
-        print_section("Snapshot")
-        with console.status("Creating pre-sync snapshot..."):
-            snap = create_snapshot(manifest, home, trigger="sync", keep=cfg.snapshot_keep)
-        print_success(f"Snapshot created: {snap.id} ({snap.file_count} files)")
-        snapshot_id = snap.id
-    else:
-        snapshot_id = ""
+    print_section("Snapshot")
+    with console.status("Creating pre-sync snapshot..."):
+        snap = create_snapshot(manifest, home, trigger="sync", keep=cfg.snapshot_keep)
+    print_success(f"Snapshot created: {snap.id} ({snap.file_count} files)")
 
-    # 3. Register new files
+    # 4. Plan sync
     print_section("Sync")
-    new_files = [f for f in files if f.include is True]
-    new_entries = register_new_files(new_files, flag_results, cfg.repo_path, home, cfg, dry_run=dry_run)
-    if new_entries:
-        print_success(f"Registered {len(new_entries)} new file(s)")
-
-    # 4. Plan & execute sync (existing manifest entries)
-    manifest = load_manifest(cfg.repo_path)  # reload after registration
     actions = plan_sync(manifest, home, cfg.repo_path, os_name)
-    executed = execute_sync(actions, dry_run=dry_run)
 
-    copied = [a for a in executed if a.action == "copy"]
-    skipped = [a for a in executed if a.action != "copy"]
+    console.print(action_table(actions))
+
+    copied = [a for a in actions if a.action == "copy"]
+    skipped = [a for a in actions if a.action != "copy"]
 
     if dry_run:
         print_warning(f"Dry run: would sync {len(copied)} file(s), skip {len(skipped)}")
-    else:
-        print_success(f"Synced {len(copied)} file(s), skipped {len(skipped)}")
+        return
 
-    # 5. Commit & push
-    if not dry_run:
-        try:
-            if no_push:
-                repo.git.add(A=True)
-                if repo.is_dirty(index=True) or repo.untracked_files:
-                    repo.index.commit(message)
-                    print_success("Changes committed (push skipped)")
-            else:
-                commit_and_push(repo, message)
-                print_success("Changes committed and pushed")
-        except NoRemoteConfiguredError:
+    if not copied:
+        print_success("Nothing to sync")
+        return
+
+    if not typer.confirm(f"Proceed with syncing {len(copied)} file(s)?"):
+        print_warning("Sync cancelled")
+        raise typer.Exit(code=EXIT_CODES["user_aborted"])
+
+    # 5. Execute sync
+    executed = execute_sync(actions, dry_run=False)
+    copied_exec = [a for a in executed if a.action == "copy"]
+    skipped_exec = [a for a in executed if a.action != "copy"]
+    print_success(f"Synced {len(copied_exec)} file(s), skipped {len(skipped_exec)}")
+
+    # 6. Commit & push
+    try:
+        if no_push:
             repo.git.add(A=True)
             if repo.is_dirty(index=True) or repo.untracked_files:
                 repo.index.commit(message)
-            print_warning("No remote configured — committed locally only")
+                print_success("Changes committed (push skipped)")
+        else:
+            commit_and_push(repo, message)
+            print_success("Changes committed and pushed")
+    except NoRemoteConfiguredError:
+        repo.git.add(A=True)
+        if repo.is_dirty(index=True) or repo.untracked_files:
+            repo.index.commit(message)
+        print_warning("No remote configured — committed locally only")
 
-    # 6. Health checks
-    if not dry_run and snapshot_id:
-        print_section("Health Checks")
-        try:
-            with console.status("Running health checks..."):
-                post_operation_checks(cfg, snapshot_id, home, operation="sync")
-            print_success("All health checks passed")
-        except HealthCheckFailedError as exc:
-            print_error(str(exc))
-            raise typer.Exit(code=EXIT_CODES["health_check_failed"]) from exc
+    # 7. Health checks
+    print_section("Health Checks")
+    try:
+        with console.status("Running health checks..."):
+            post_operation_checks(cfg, snap.id, home, operation="sync")
+        print_success("All health checks passed")
+    except HealthCheckFailedError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=EXIT_CODES["health_check_failed"]) from exc
 
 
 @app.command()

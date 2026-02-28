@@ -26,7 +26,7 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 
 ### 3. File Discovery (`discovery.py`)
 
-- `ConfigFile` Pydantic model: path, size, include verdict, reason, os_profile
+- `ConfigFile` Pydantic model: path, size, include verdict, sensitive flag, reason, os_profile
 - `SAFETY_EXCLUDES`: security invariants (SSH keys, `.gnupg/`, `.dotsync/`, `dotsync.key`) — never included, enforced on extra paths too
 - `PRUNE_DIRS`: ~30 directory names pruned by exact name match during walk (`.git`, `node_modules`, `__pycache__`, cache dirs, build dirs, etc.)
 - `_PRUNE_PREFIXES`: multi-segment prefixes (`.local/share/`, `.local/lib/`) pruned by prefix match
@@ -73,7 +73,7 @@ Orchestrates file operations between the home directory and the dotfiles reposit
 - **Path transformer**: `transform_paths()` rewrites home-directory paths in file content across platforms (Linux ↔ Windows), matching only value positions (after `=`, `:`, or in quotes) to avoid mangling URLs
 - **Sync (home → repo)**: `SyncAction` dataclass; `plan_sync()` filters by profile and checks file existence; `execute_sync()` copies files with `shutil.copy2`, supports dry-run
 - **Restore (repo → home)**: `RestoreAction` dataclass; `plan_restore()` checks profile and repo file existence; `execute_restore()` copies files, optionally applying cross-platform path transforms for shared files
-- **New file registration**: `register_new_files()` accepts pre-confirmed files from the CLI layer, copies to repo and adds manifest entries; supports dry-run
+- **New file registration**: `register_new_files()` accepts pre-confirmed files from the CLI layer, copies to repo and adds manifest entries with `sensitive_flagged` propagated from `ConfigFile.sensitive`; supports dry-run
 - **Conflict detection**: `detect_conflicts()` compares mtime of local and repo copies against `last_sync` — conflict when both sides modified after last sync
 
 ### 7. Snapshots (`snapshot.py`)

@@ -402,6 +402,44 @@ class TestRegisterNewFiles:
         assert len(manifest_data) == 1
         assert manifest_data[0]["relative_path"] == ".vimrc"
 
+    def test_register_propagates_sensitive_flag(self, tmp_path: Path) -> None:
+        """sensitive_flagged should reflect ConfigFile.sensitive."""
+        home = tmp_path / "home"
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
+
+        cfg = _cfg(tmp_path)
+        cf = _config_file(tmp_path, ".env_config", include=True)
+        cf.sensitive = True
+        fr = FlagResult(config_file=cf, requires_confirmation=False)
+
+        entries = register_new_files([cf], [fr], repo, home, cfg)
+
+        assert len(entries) == 1
+        assert entries[0].sensitive_flagged is True
+
+        manifest_data = json.loads(
+            (repo / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert manifest_data[0]["sensitive_flagged"] is True
+
+    def test_register_sensitive_false_by_default(self, tmp_path: Path) -> None:
+        """Non-sensitive file should have sensitive_flagged=False in manifest."""
+        home = tmp_path / "home"
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
+
+        cfg = _cfg(tmp_path)
+        cf = _config_file(tmp_path, ".bashrc", include=True)
+        fr = FlagResult(config_file=cf, requires_confirmation=False)
+
+        entries = register_new_files([cf], [fr], repo, home, cfg)
+
+        assert len(entries) == 1
+        assert entries[0].sensitive_flagged is False
+
     def test_register_dry_run_no_writes(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
         repo = tmp_path / "repo"

@@ -9,7 +9,8 @@ from typer.testing import CliRunner
 from dotsync.config import default_config
 from dotsync.discovery import ConfigFile
 from dotsync.flagging import FlagResult, SensitiveMatch
-from dotsync.main import EXIT_CODES, app, confirm_sensitive_files
+from dotsync.git_ops import ManifestEntry
+from dotsync.main import EXIT_CODES, _mark_sensitive, app, confirm_sensitive_files
 
 runner = CliRunner()
 
@@ -74,6 +75,91 @@ class TestConfirmSensitiveFiles:
 
 
 # ---------------------------------------------------------------------------
+# TestMarkSensitive
+# ---------------------------------------------------------------------------
+
+
+class TestMarkSensitive:
+    """Tests for _mark_sensitive() helper."""
+
+    def test_mark_sensitive_sets_flag_on_included_match(self) -> None:
+        """File with matches and confirmed (requires_confirmation=False) should be marked sensitive."""
+        cf = ConfigFile(
+            path=Path(".env"),
+            abs_path=Path.home() / ".env",
+            size_bytes=50,
+            include=True,
+            reason="home dotfile",
+            os_profile="shared",
+        )
+        fr = FlagResult(
+            config_file=cf,
+            matches=[SensitiveMatch(pattern_name="generic_token", line_number=1, preview="to***en")],
+            ai_flagged=False,
+            requires_confirmation=False,
+        )
+        _mark_sensitive([fr])
+        assert cf.sensitive is True
+
+    def test_mark_sensitive_sets_flag_on_ai_flagged(self) -> None:
+        """AI-flagged file that was confirmed should be marked sensitive."""
+        cf = ConfigFile(
+            path=Path(".secrets"),
+            abs_path=Path.home() / ".secrets",
+            size_bytes=50,
+            include=True,
+            reason="home dotfile",
+            os_profile="shared",
+        )
+        fr = FlagResult(
+            config_file=cf,
+            matches=[],
+            ai_flagged=True,
+            requires_confirmation=False,
+        )
+        _mark_sensitive([fr])
+        assert cf.sensitive is True
+
+    def test_mark_sensitive_skips_unconfirmed(self) -> None:
+        """File still requiring confirmation should not be marked sensitive."""
+        cf = ConfigFile(
+            path=Path(".bashrc"),
+            abs_path=Path.home() / ".bashrc",
+            size_bytes=100,
+            include=True,
+            reason="home dotfile",
+            os_profile="shared",
+        )
+        fr = FlagResult(
+            config_file=cf,
+            matches=[SensitiveMatch(pattern_name="generic_token", line_number=1, preview="to***en")],
+            ai_flagged=False,
+            requires_confirmation=True,
+        )
+        _mark_sensitive([fr])
+        assert cf.sensitive is False
+
+    def test_mark_sensitive_skips_clean_files(self) -> None:
+        """File with no matches and not AI-flagged should stay sensitive=False."""
+        cf = ConfigFile(
+            path=Path(".bashrc"),
+            abs_path=Path.home() / ".bashrc",
+            size_bytes=100,
+            include=True,
+            reason="home dotfile",
+            os_profile="shared",
+        )
+        fr = FlagResult(
+            config_file=cf,
+            matches=[],
+            ai_flagged=False,
+            requires_confirmation=False,
+        )
+        _mark_sensitive([fr])
+        assert cf.sensitive is False
+
+
+# ---------------------------------------------------------------------------
 # TestConfigCommand
 # ---------------------------------------------------------------------------
 
@@ -121,30 +207,35 @@ class TestErrorHandling:
         cfg = default_config()
         mock_load.return_value = cfg
 
+        manifest = [
+            ManifestEntry(
+                relative_path=".bashrc",
+                os_profile="shared",
+                added_at="2026-01-01",
+                sensitive_flagged=False,
+            ),
+        ]
+
         with (
-            patch("dotsync.discovery.discover", return_value=[]),
+            patch("dotsync.git_ops.load_manifest", return_value=manifest),
             patch("dotsync.flagging.flag_all", return_value=[]),
-            patch("dotsync.flagging.enforce_never_include", return_value=[]),
             patch("dotsync.git_ops.init_repo") as mock_repo,
-            patch("dotsync.git_ops.load_manifest", return_value=[]),
-            patch("dotsync.sync.register_new_files", return_value=[]),
-            patch("dotsync.sync.plan_sync", return_value=[]),
+            patch("dotsync.snapshot.create_snapshot") as mock_snap,
+            patch("dotsync.sync.plan_sync") as mock_plan,
             patch("dotsync.sync.execute_sync", return_value=[]),
             patch("dotsync.git_ops.commit_and_push"),
             patch("dotsync.health.post_operation_checks", side_effect=HealthCheckFailedError("git check failed")),
-            patch("dotsync.snapshot.create_snapshot") as mock_snap,
             patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
             patch("dotsync.platform_utils.current_os", return_value="linux"),
+            patch("dotsync.main.typer.confirm", return_value=True),
         ):
             mock_snap.return_value = MagicMock(id="2026-01-01T00-00-00", file_count=3)
             mock_repo.return_value = MagicMock()
-            # Need manifest to be non-empty to trigger snapshot + health checks
-            with patch("dotsync.git_ops.load_manifest") as mock_manifest:
-                mock_manifest.side_effect = [
-                    [MagicMock(relative_path=".bashrc", os_profile="shared")],
-                    [MagicMock(relative_path=".bashrc", os_profile="shared")],
-                ]
-                result = runner.invoke(app, ["sync"])
+            # plan_sync returns one copy action so sync proceeds
+            mock_action = MagicMock(action="copy", source=Path("/home/test/.bashrc"))
+            mock_plan.return_value = [mock_action]
+
+            result = runner.invoke(app, ["sync"])
 
         assert result.exit_code == EXIT_CODES["health_check_failed"]
 
@@ -171,37 +262,14 @@ class TestDiscoverProgress:
         cfg = default_config()
         mock_load.return_value = cfg
 
-        with patch("dotsync.discovery.discover") as mock_discover:
-            mock_discover.return_value = []
-            result = runner.invoke(app, ["discover", "--no-ai"])
-
-        assert result.exit_code == 0
-        mock_discover.assert_called_once()
-        _, kwargs = mock_discover.call_args
-        assert "progress" in kwargs
-        assert callable(kwargs["progress"])
-
-    @patch("dotsync.config.load_config")
-    def test_sync_passes_progress_callback(self, mock_load: MagicMock) -> None:
-        """sync command should call discover() with a callable progress kwarg."""
-        cfg = default_config()
-        mock_load.return_value = cfg
-
         with (
             patch("dotsync.discovery.discover") as mock_discover,
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.flagging.enforce_never_include", return_value=[]),
-            patch("dotsync.git_ops.init_repo") as mock_repo,
+            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=[]),
-            patch("dotsync.sync.register_new_files", return_value=[]),
-            patch("dotsync.sync.plan_sync", return_value=[]),
-            patch("dotsync.sync.execute_sync", return_value=[]),
-            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
-            patch("dotsync.platform_utils.current_os", return_value="linux"),
         ):
             mock_discover.return_value = []
-            mock_repo.return_value = MagicMock()
-            result = runner.invoke(app, ["sync", "--dry-run"])
+            result = runner.invoke(app, ["discover", "--no-ai"])
 
         assert result.exit_code == 0
         mock_discover.assert_called_once()
@@ -237,9 +305,14 @@ class TestDiscoverProgress:
                 ))
             return []
 
-        with patch("dotsync.discovery.discover", side_effect=fake_discover):
-            with patch("dotsync.main.logger") as mock_logger:
-                result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
+        with (
+            patch("dotsync.discovery.discover", side_effect=fake_discover),
+            patch("dotsync.main.logger") as mock_logger,
+            patch("dotsync.flagging.enforce_never_include", return_value=[]),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.load_manifest", return_value=[]),
+        ):
+            result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
 
         assert result.exit_code == 0
         # Verify debug logs were emitted for pruned/rejected events
@@ -286,9 +359,14 @@ class TestDiscoverProgress:
                 ))
             return []
 
-        with patch("dotsync.discovery.discover", side_effect=fake_discover):
-            with patch("dotsync.main.logger") as mock_logger:
-                result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
+        with (
+            patch("dotsync.discovery.discover", side_effect=fake_discover),
+            patch("dotsync.main.logger") as mock_logger,
+            patch("dotsync.flagging.enforce_never_include", return_value=[]),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.load_manifest", return_value=[]),
+        ):
+            result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
 
         assert result.exit_code == 0
         debug_calls = mock_logger.debug.call_args_list
@@ -298,3 +376,174 @@ class TestDiscoverProgress:
         assert "/home/test/.config/nvim/init.lua" in str(accepted_logs[1])
 
 
+# ---------------------------------------------------------------------------
+# TestDiscoverRegistration
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverRegistration:
+    """Tests for the discover command's registration flow."""
+
+    @patch("dotsync.config.load_config")
+    def test_discover_registers_new_files(self, mock_load: MagicMock) -> None:
+        """discover should call register_new_files for included, untracked files."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        files = [
+            ConfigFile(
+                path=Path(".bashrc"),
+                abs_path=Path("/home/test/.bashrc"),
+                size_bytes=100,
+                include=True,
+                reason="known",
+                os_profile="shared",
+            ),
+        ]
+
+        with (
+            patch("dotsync.discovery.discover", return_value=files),
+            patch("dotsync.flagging.enforce_never_include"),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.load_manifest", return_value=[]),
+            patch("dotsync.git_ops.init_repo"),
+            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
+            patch("dotsync.sync.register_new_files", return_value=[MagicMock()]) as mock_register,
+            patch("dotsync.main.typer.confirm", return_value=True),
+        ):
+            result = runner.invoke(app, ["discover", "--no-ai"])
+
+        assert result.exit_code == 0
+        mock_register.assert_called_once()
+
+    @patch("dotsync.config.load_config")
+    def test_discover_skips_already_tracked(self, mock_load: MagicMock) -> None:
+        """discover should not try to register files already in manifest."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        files = [
+            ConfigFile(
+                path=Path(".bashrc"),
+                abs_path=Path("/home/test/.bashrc"),
+                size_bytes=100,
+                include=True,
+                reason="known",
+                os_profile="shared",
+            ),
+        ]
+
+        manifest = [
+            ManifestEntry(
+                relative_path=".bashrc",
+                os_profile="shared",
+                added_at="2026-01-01",
+                sensitive_flagged=False,
+            ),
+        ]
+
+        with (
+            patch("dotsync.discovery.discover", return_value=files),
+            patch("dotsync.flagging.enforce_never_include"),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.load_manifest", return_value=manifest),
+        ):
+            result = runner.invoke(app, ["discover", "--no-ai"])
+
+        assert result.exit_code == 0
+        # Should print "Nothing new to register"
+        assert "Nothing new to register" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSyncManifestBased
+# ---------------------------------------------------------------------------
+
+
+class TestSyncManifestBased:
+    """Tests for the sync command's manifest-based flow."""
+
+    @patch("dotsync.config.load_config")
+    def test_sync_exits_when_manifest_empty(self, mock_load: MagicMock) -> None:
+        """sync should exit with a message when manifest is empty."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        with (
+            patch("dotsync.git_ops.load_manifest", return_value=[]),
+            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
+            patch("dotsync.platform_utils.current_os", return_value="linux"),
+        ):
+            result = runner.invoke(app, ["sync"])
+
+        assert result.exit_code == EXIT_CODES["user_aborted"]
+        assert "dotsync discover" in result.output
+
+    @patch("dotsync.config.load_config")
+    def test_sync_does_not_run_discovery(self, mock_load: MagicMock) -> None:
+        """sync should NOT call discover() — it works from manifest only."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        manifest = [
+            ManifestEntry(
+                relative_path=".bashrc",
+                os_profile="shared",
+                added_at="2026-01-01",
+                sensitive_flagged=False,
+            ),
+        ]
+
+        with (
+            patch("dotsync.git_ops.load_manifest", return_value=manifest),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.init_repo") as mock_repo,
+            patch("dotsync.snapshot.create_snapshot") as mock_snap,
+            patch("dotsync.sync.plan_sync", return_value=[]),
+            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
+            patch("dotsync.platform_utils.current_os", return_value="linux"),
+            patch("dotsync.discovery.discover") as mock_discover,
+        ):
+            mock_snap.return_value = MagicMock(id="snap-1", file_count=1)
+            mock_repo.return_value = MagicMock()
+
+            result = runner.invoke(app, ["sync", "--dry-run"])
+
+        assert result.exit_code == 0
+        mock_discover.assert_not_called()
+
+    @patch("dotsync.config.load_config")
+    def test_sync_dry_run_exits_early(self, mock_load: MagicMock) -> None:
+        """sync --dry-run should display plan and exit without executing."""
+        cfg = default_config()
+        mock_load.return_value = cfg
+
+        manifest = [
+            ManifestEntry(
+                relative_path=".bashrc",
+                os_profile="shared",
+                added_at="2026-01-01",
+                sensitive_flagged=False,
+            ),
+        ]
+
+        mock_action = MagicMock(action="copy", source=Path("/home/test/.bashrc"), transformed=False)
+
+        with (
+            patch("dotsync.git_ops.load_manifest", return_value=manifest),
+            patch("dotsync.flagging.flag_all", return_value=[]),
+            patch("dotsync.git_ops.init_repo") as mock_repo,
+            patch("dotsync.snapshot.create_snapshot") as mock_snap,
+            patch("dotsync.sync.plan_sync", return_value=[mock_action]),
+            patch("dotsync.sync.execute_sync") as mock_execute,
+            patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
+            patch("dotsync.platform_utils.current_os", return_value="linux"),
+        ):
+            mock_snap.return_value = MagicMock(id="snap-1", file_count=1)
+            mock_repo.return_value = MagicMock()
+
+            result = runner.invoke(app, ["sync", "--dry-run"])
+
+        assert result.exit_code == 0
+        mock_execute.assert_not_called()
+        assert "Dry run" in result.output

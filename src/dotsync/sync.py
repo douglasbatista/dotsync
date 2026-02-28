@@ -402,7 +402,7 @@ def register_new_files(
             relative_path=str(cf.path),
             os_profile=cf.os_profile,
             added_at=now,
-            sensitive_flagged=False,
+            sensitive_flagged=cf.sensitive,
         )
         new_entries.append(entry)
 

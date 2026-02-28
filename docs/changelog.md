@@ -181,5 +181,14 @@
   - Removed `_BLOCKED_FILENAME_GLOBS` mechanism (no longer needed — all entries are exact matches)
   - Test suite expanded from 86 to 108 tests in `test_discovery.py` (+ 2 perf tests)
 
+### Added (continued)
+- Sensitivity persistence pipeline
+  - `ConfigFile.sensitive: bool = False` field added to discovery model (Module 00 spec alignment)
+  - `_mark_sensitive()` helper in `main.py` — sets `sensitive=True` on ConfigFiles with regex matches or AI flags that were confirmed for inclusion
+  - Called after `confirm_sensitive_files()` in both `discover` and `sync` commands
+  - `register_new_files()` now propagates `ConfigFile.sensitive` → `ManifestEntry.sensitive_flagged` (was hardcoded `False`)
+  - `_manifest_to_config_files()` propagates `ManifestEntry.sensitive_flagged` → `ConfigFile.sensitive` for round-trip consistency
+  - 6 new tests: 4 for `_mark_sensitive()` (match, AI-flagged, unconfirmed skip, clean file), 2 for `register_new_files()` sensitive propagation
+
 ### Fixed
-- None
+- `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest

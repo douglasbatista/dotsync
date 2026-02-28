@@ -70,6 +70,9 @@ class ConfigFile(BaseModel):
     include: bool | None = None
     """True = include, False = exclude, None = pending/unknown."""
 
+    sensitive: bool = False
+    """Whether the file was flagged as containing sensitive data."""
+
     reason: str = "unknown"
     """Classification reason, e.g. 'known', 'user_excluded', 'ai:include'."""
 
