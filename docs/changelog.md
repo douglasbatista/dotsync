@@ -129,6 +129,7 @@
   - `ScanStats` dataclass and `make_scan_display()` Rich table helper in `ui.py`
   - `_run_discover_with_progress()` helper in `main.py` using `Rich.Live` for real-time scan statistics
   - `discover` and `sync` commands now show live progress (dirs scanned, files accepted/rejected, current directory, phase)
+  - Animated spinner (`Spinner("dots")`) and elapsed time counter in scan display — auto-refreshes via `Rich.Live` so the UI always shows activity, even during long AI API calls
   - `--verbose` flag now surfaces `dir_pruned` and `file_rejected` events at DEBUG level
   - `--verbose` logs the full list of accepted files after scan phase completes
   - 4 new tests covering progress callback wiring and verbose logging

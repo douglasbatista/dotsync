@@ -106,10 +106,12 @@ def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
     Returns:
         List of ConfigFile results from discover().
     """
+    import time
+
     from dotsync.discovery import ScanEvent, discover as run_discover
     from dotsync.ui import ScanStats, console, make_scan_display
 
-    stats = ScanStats()
+    stats = ScanStats(start_time=time.monotonic())
     accepted_paths: list[str] = []
 
     def on_event(event: ScanEvent) -> None:

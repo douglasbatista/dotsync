@@ -110,6 +110,7 @@ Rich terminal output helpers for consistent formatting across all commands.
 - **Message helpers**: `print_success()` (green), `print_warning()` (yellow), `print_error()` (red/stderr), `print_section()` (bold rule)
 - **Tables**: `file_table()` for ConfigFile lists (path, size, verdict, reason, OS), `snapshot_table()` for SnapshotMeta lists (numbered, with ID, date, trigger, file count, host)
 - **Panels**: `flag_panel()` for sensitive file details (matches with line numbers and redacted previews, AI flag status)
+- **Live scan display**: `ScanStats` dataclass with `start_time` field; `make_scan_display()` returns a `Group` of animated `Spinner("dots")` and stats table with elapsed time — auto-refreshes via `Rich.Live` even between events
 
 ## Data Flow
 

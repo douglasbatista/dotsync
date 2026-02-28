@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
+from rich.text import Text
 
 if TYPE_CHECKING:
     from dotsync.discovery import ConfigFile
@@ -29,23 +31,36 @@ class ScanStats:
     current_dir: str = ""
     phase: str = ""
     ai_batches_done: int = 0
+    start_time: float = 0.0
 
 
-def make_scan_display(stats: ScanStats) -> Table:
-    """Build a compact Rich table showing live scan statistics.
+def _format_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as a compact string."""
+    mins, secs = divmod(int(seconds), 60)
+    if mins:
+        return f"{mins}m {secs:02d}s"
+    return f"{secs}s"
+
+
+def make_scan_display(stats: ScanStats) -> Group:
+    """Build a compact Rich display showing live scan statistics with spinner.
 
     Args:
         stats: Current scan statistics.
 
     Returns:
-        A Rich Table summarising the scan state.
+        A Rich Group containing a spinner header and stats table.
     """
+    import time
+
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("Key", style="bold cyan", no_wrap=True)
     table.add_column("Value")
 
     phase_label = stats.phase or "starting"
+    elapsed = time.monotonic() - stats.start_time if stats.start_time else 0.0
     table.add_row("Phase", phase_label)
+    table.add_row("Elapsed", _format_elapsed(elapsed))
     table.add_row("Dirs scanned", str(stats.dirs_entered))
     table.add_row("Dirs pruned", str(stats.dirs_pruned))
     table.add_row("Files accepted", str(stats.files_accepted))
@@ -61,7 +76,12 @@ def make_scan_display(stats: ScanStats) -> Table:
             display_dir = "..." + display_dir[-57:]
         table.add_row("Current dir", f"[dim]{display_dir}[/dim]")
 
-    return table
+    spinner_text = Text.assemble(
+        " ", (f"  {phase_label}...", "dim"),
+    )
+    spinner = Spinner("dots", text=spinner_text, style="cyan")
+
+    return Group(spinner, table)
 
 
 def print_success(msg: str) -> None:

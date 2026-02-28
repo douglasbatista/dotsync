@@ -93,7 +93,8 @@
 - [x] Rich UI helpers (`ui.py`)
   - [x] `print_success()`, `print_warning()`, `print_error()`, `print_section()`
   - [x] `file_table()`, `snapshot_table()`, `flag_panel()`
-  - [x] `ScanStats` dataclass and `make_scan_display()` for live scan progress
+  - [x] `ScanStats` dataclass (with `start_time`) and `make_scan_display()` returning `Group` with spinner + stats table
+  - [x] Animated `Spinner("dots")` and elapsed time counter — auto-refreshes between events
   - [x] Live progress wired into `discover` and `sync` commands via `_run_discover_with_progress()`
   - [x] `--verbose` surfaces `dir_pruned`/`file_rejected` events at DEBUG level
   - [x] `--verbose` logs full list of accepted files after scan phase ends
