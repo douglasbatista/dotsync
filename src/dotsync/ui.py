@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from dotsync.discovery import ConfigFile
     from dotsync.flagging import FlagResult
     from dotsync.snapshot import SnapshotMeta
+    from dotsync.sync import SyncAction
 
 console = Console()
 err_console = Console(stderr=True, style="bold red")
@@ -185,6 +186,31 @@ def flag_panel(flag_result: FlagResult) -> Panel:
         lines.append("  [yellow]AI flagged as potentially sensitive[/yellow]")
 
     return Panel("\n".join(lines), title="Sensitive File", border_style="yellow")
+
+
+def action_table(actions: list[SyncAction]) -> Table:
+    """Build a Rich table of planned sync actions.
+
+    Args:
+        actions: List of SyncAction objects to display.
+
+    Returns:
+        A Rich Table ready to print.
+    """
+    table = Table(title="Sync Plan")
+    table.add_column("Source", style="cyan")
+    table.add_column("Action", style="bold")
+    table.add_column("Transformed", style="dim")
+
+    for a in actions:
+        style = "green" if a.action == "copy" else "yellow"
+        table.add_row(
+            str(a.source),
+            f"[{style}]{a.action}[/{style}]",
+            "yes" if a.transformed else "no",
+        )
+
+    return table
 
 
 def _human_size(size_bytes: int) -> str:
