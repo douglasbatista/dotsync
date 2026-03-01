@@ -35,6 +35,8 @@ packages = ["src/dotsync"]
 addopts = "-m 'not perf'"
 markers = [
     "perf: performance benchmarks (deselected by default, run with: pytest -m perf)",
+    "integration: cross-module integration tests",
+    "e2e: end-to-end CLI tests",
 ]
 
 [tool.uv]

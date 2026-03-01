@@ -106,14 +106,46 @@
   - [x] `--verbose` logs full list of accepted files after scan phase ends
   - [x] 11 tests covering CLI (up from 7)
 
+- [x] Integration tests (`test_integration.py`)
+  - [x] Shared test fixtures in `tests/conftest.py`: `dotsync_env`, `sample_dotfiles`, `mock_gitcrypt`, `mock_health_checks`
+  - [x] Config → Discovery pipeline (3 tests): home dotfile discovery, exclude patterns, repo_path exclusion
+  - [x] Discovery → Flagging → Registration (3 tests): secret detection, clean file pass-through, sensitive flag propagation
+  - [x] Sync pipeline (3 tests): file copy to repo, manifest update, dry-run no-op
+  - [x] Restore pipeline (2 tests): repo → home restore, cross-platform path transformation
+  - [x] Snapshot → Rollback (2 tests): create/modify/rollback cycle, retention limit enforcement
+  - [x] Health → Auto-rollback (2 tests): post-operation pass, failure-triggered rollback
+  - [x] 15 integration tests total
+
+- [x] End-to-end CLI tests (`test_e2e.py`)
+  - [x] `init` creates config and repo, idempotent on second run
+  - [x] `status` shows repo path and managed file count
+  - [x] `config --show` and `config --set` round-trip
+  - [x] `discover --no-ai` finds and lists dotfiles
+  - [x] `sync --dry-run --no-push` reports dry run without copying files
+  - [x] 6 e2e tests total via Typer `CliRunner`
+
+- [x] Manual smoke testing of full CLI workflows
+  - [x] `init` → `status` → `config --show` → `config --set` → `config --show` (verify)
+  - [x] `discover --no-ai` with interactive confirmation
+  - [x] `sync --dry-run --no-push` shows plan without side effects
+  - [x] `sync --no-push` copies files, commits locally, passes health checks
+  - [x] `restore --no-pull` restores files from repo, content matches original
+  - [x] `rollback --list` shows snapshots with correct triggers and retention
+  - [x] `init` idempotent (second run with overwrite confirmation)
+
+- [x] Test infrastructure
+  - [x] `pytest.mark.integration` and `pytest.mark.e2e` markers in `pyproject.toml`
+  - [x] 277 tests total (254 unit + 15 integration + 6 e2e + 2 perf deselected)
+
 ### In Progress
 - (none)
 
 ### Pending
-- [ ] Integration tests
-- [ ] End-to-end testing
+- (none)
 
 ## Next Steps
 
-1. Integration and end-to-end testing
-2. Manual smoke testing of full CLI workflows
+All core modules, CLI commands, and test suites are complete. Potential future work:
+- Cross-platform testing on Windows
+- CI pipeline setup
+- Package publishing

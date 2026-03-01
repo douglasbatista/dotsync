@@ -208,5 +208,14 @@
   - `discover()` passes `cfg.repo_path` to `scan_candidates()`
   - 2 new tests: `test_prune_skips_repo_path`, `test_prune_skips_repo_path_custom_name`
 
+### Added (continued)
+- Integration and end-to-end test suites
+  - `tests/conftest.py` — shared fixtures: `dotsync_env` (full filesystem isolation via `tmp_path`), `sample_dotfiles`, `mock_gitcrypt`, `mock_health_checks`
+  - `tests/test_integration.py` — 15 cross-module integration tests covering config→discovery, discovery→flagging→registration, sync, restore, snapshot→rollback, and health→auto-rollback pipelines
+  - `tests/test_e2e.py` — 6 end-to-end CLI tests via Typer `CliRunner` covering `init`, `status`, `config`, `discover`, and `sync --dry-run`
+  - `pytest.mark.integration` and `pytest.mark.e2e` markers registered in `pyproject.toml`
+  - Manual smoke testing of all CLI workflows: init, status, config, discover, sync, restore, rollback
+  - Total test count: 277 (254 unit + 15 integration + 6 e2e + 2 perf deselected)
+
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest
