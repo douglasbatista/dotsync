@@ -106,6 +106,42 @@ uv run dotsync discover --no-ai
 - git
 - git-crypt
 
+### Installing git-crypt
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt update && sudo apt install git-crypt
+```
+
+**Linux (Fedora):**
+
+```bash
+sudo dnf install git-crypt
+```
+
+**Linux (Arch):**
+
+```bash
+sudo pacman -S git-crypt
+```
+
+**Windows (Scoop):**
+
+```powershell
+scoop install git-crypt
+```
+
+**Windows (Chocolatey):**
+
+```powershell
+choco install git-crypt
+```
+
+**Windows (WSL):**
+
+Install inside your WSL distribution using the Linux instructions above.
+
 ### Setup
 
 ```bash
