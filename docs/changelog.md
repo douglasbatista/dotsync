@@ -226,5 +226,18 @@
   - Development prerequisites and setup commands
   - Project structure tree with module descriptions
 
+### Changed (continued)
+- Discovery module: switched from blacklist to whitelist-based file pre-filtering
+  - Removed `BLOCKED_EXTENSIONS` (~48 extensions), `BLOCKED_FILENAMES` (~30 names), and `_is_blocked_file()` function
+  - Added `ALLOWED_EXTENSIONS` (14 config extensions: `.toml`, `.yaml`, `.yml`, `.json`, `.jsonc`, `.ini`, `.cfg`, `.conf`, `.config`, `.xml`, `.properties`, `.env`, `.rc`, `.plist`)
+  - Added `ALLOWED_NAMED_FILES` (extensionless names: `config`, `credentials`)
+  - Added `HOME_BLOCKED_DOTFILES` (~18 known noise dotfiles: history files, auth tokens, session errors)
+  - `_prefilter_file()` rewritten with whitelist logic: safety → size → whitelist gate → binary check
+  - Home-root dotfiles (direct `$HOME` children starting with `.`) get special handling: accepted if extensionless or allowed extension, rejected if in `HOME_BLOCKED_DOTFILES`
+  - `_scan_dir()` now passes `is_home_root` flag to `_prefilter_file()` for context-aware filtering
+  - `_is_generated_filename()` removed from file-level filtering (retained in `_should_prune_dir()` for directory pruning only)
+  - Test suite rewritten: blacklist-specific tests replaced with whitelist accept/reject tests; 94 tests (+ 2 perf deselected)
+  - Total test count: 270 (+ 2 perf deselected)
+
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest

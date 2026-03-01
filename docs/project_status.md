@@ -16,7 +16,7 @@
 - [x] Documentation structure established
 - [x] File discovery and classification (`discovery.py`)
   - [x] `ConfigFile` Pydantic model (includes `sensitive: bool` field for flagging persistence)
-  - [x] `scan_candidates(repo_path=...)` with `os.scandir()` + `_scan_dir()` recursive scanner, parallel root scanning via `ThreadPoolExecutor`, per-root max depth, two-phase filtering: subtree pruning (`PRUNE_DIRS` + `_PRUNE_PREFIXES` + `repo_path`) and `_prefilter_file()` (safety excludes, `BLOCKED_EXTENSIONS`, `BLOCKED_FILENAMES`, size >50 KB, 512-byte binary detection)
+  - [x] `scan_candidates(repo_path=...)` with `os.scandir()` + `_scan_dir()` recursive scanner, parallel root scanning via `ThreadPoolExecutor`, per-root max depth, two-phase filtering: subtree pruning (`PRUNE_DIRS` + `_PRUNE_PREFIXES` + `repo_path` + generated dir names) and `_prefilter_file()` with whitelist gate (safety excludes, size >50 KB, `ALLOWED_EXTENSIONS` / `ALLOWED_NAMED_FILES` / extensionless home dotfiles, `HOME_BLOCKED_DOTFILES`, 512-byte binary detection)
   - [x] `HOME_SCAN_DEPTH = 1` — `$HOME` scanned shallowly (direct children only), 21 `KNOWN_CONFIG_SUBDIRS` get deep scan (XDG, shell, editors, dev tools)
   - [x] `config_dirs()` returns `list[tuple[Path, int]]` with per-root max depth, existence-checked subdirs, `XDG_CONFIG_HOME` support
   - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension)
@@ -26,14 +26,17 @@
   - [x] `ScanEvent` TypedDict and `ProgressCallback` for real-time progress reporting
   - [x] Progress events: `root_start`/`root_done`, `dir_enter`/`dir_pruned`, `file_accepted`/`file_rejected`, `phase_start`/`phase_done`, `ai_batch`
   - [x] `BLOCKED_FILENAME_PATTERNS` with regex detection for UUID (incl. dot-prefix), hex (incl. @version), numeric, hex-with-dots, trailing timestamp filenames
-  - [x] `_is_generated_filename()` wired into `_prefilter_file()` pipeline (checks both stem and name)
+  - [x] `_is_generated_filename()` used in `_should_prune_dir()` for directory-level pruning only (removed from file-level filtering)
   - [x] `_should_prune_dir()` prunes directories with generated names (UUID, hex, numeric) via `_is_generated_filename()`
   - [x] AI system prompt uses environment-vs-infrastructure framing (not authorship)
-  - [x] `BLOCKED_EXTENSIONS`: `.md`, `.rst`, `.sh`, `.bash`, `.txt`, `.orig`, `.bak`, `.backup`, `.tmp`, `.jsonl`, `.po`, `.pot`, `.zsh-theme`, `.theme`, `.info`
-  - [x] `BLOCKED_FILENAMES`: Cargo metadata, license/legal, docs, runtime state markers (`.lock`, `.highwatermark`, `.pid`), build files (`Makefile`, `GNUmakefile`, `build.info`, `bindgen`)
+  - [x] Whitelist-based file pre-filtering (replaces blacklist approach):
+    - [x] `ALLOWED_EXTENSIONS`: 14 config extensions (`.toml`, `.yaml`, `.yml`, `.json`, `.jsonc`, `.ini`, `.cfg`, `.conf`, `.config`, `.xml`, `.properties`, `.env`, `.rc`, `.plist`)
+    - [x] `ALLOWED_NAMED_FILES`: extensionless names (`config`, `credentials`)
+    - [x] `HOME_BLOCKED_DOTFILES`: ~18 known noise dotfiles rejected at `$HOME` root
+    - [x] Home-root dotfiles accepted if extensionless or allowed extension
   - [x] `PRUNE_DIRS` expanded with `registry`, `bin`, `extensions`, `file-history`, `backups`, `todos`, `plugins`, `themes`, `custom`, `l10n`/`locales`/`locale`, `licenses`, `projects`, `tasks`, `conversations`, `events`, `subagents`, `language`, `gitstatus`, `.github`, `.gitlab`
   - [x] `_should_prune_dir()` excludes `repo_path` by resolved path comparison (dynamic, name-independent)
-  - [x] 112 tests + 2 perf tests with full acceptance criteria coverage
+  - [x] 94 tests + 2 perf tests with full acceptance criteria coverage
 - [x] Sensitive data flagging (`flagging.py`)
   - [x] 11 compiled regex patterns for secret detection
   - [x] `NEVER_INCLUDE` defense-in-depth blocklist
@@ -135,7 +138,7 @@
 
 - [x] Test infrastructure
   - [x] `pytest.mark.integration` and `pytest.mark.e2e` markers in `pyproject.toml`
-  - [x] 277 tests total (254 unit + 15 integration + 6 e2e + 2 perf deselected)
+  - [x] 272 tests total (249 unit + 15 integration + 6 e2e + 2 perf deselected)
 
 - [x] README.md with user-facing documentation
   - [x] Features, quick start, command reference, configuration, security, AI triage, development, and project structure sections

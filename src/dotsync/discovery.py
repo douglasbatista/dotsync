@@ -135,49 +135,27 @@ _PRUNE_PREFIXES: list[str] = [
     ".local/lib/",
 ]
 
-BLOCKED_EXTENSIONS: list[str] = [
-    ".lock", ".sum", ".log", ".pid", ".sock",
-    ".sqlite", ".sqlite3", ".db", ".ldb", ".mdb",
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp",
-    ".mp3", ".mp4", ".woff", ".woff2", ".ttf", ".otf",
-    ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z",
-    ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin", ".dat",
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".rs", ".go",
-    ".c", ".h", ".cpp", ".java", ".class", ".jar", ".cs",
-    ".md", ".rst",
-    ".sh", ".bash",
-    ".txt",
-    ".orig",
-    ".bak", ".backup",
-    ".tmp",
-    # Structured log / data
-    ".jsonl",
-    # Gettext translation files
-    ".po", ".pot",
-    # Shell / app theme files
-    ".zsh-theme", ".theme",
-    # Metadata / info files
-    ".info",
-]
-_BLOCKED_EXTENSIONS_SET: frozenset[str] = frozenset(BLOCKED_EXTENSIONS)
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset({
+    ".toml", ".yaml", ".yml", ".json", ".jsonc", ".ini",
+    ".cfg", ".conf", ".config", ".xml", ".properties",
+    ".env", ".rc", ".plist",
+})
 
-BLOCKED_FILENAMES: list[str] = [
-    # Package manager lockfiles
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "Cargo.lock", "Gemfile.lock", "poetry.lock", "composer.lock",
-    # Cargo / crate metadata
-    ".cargo-ok", ".cargo_vcs_info.json",
-    # License / legal
-    "LICENSE", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-BSD",
-    "COPYING", "NOTICE", "AUTHORS", "CONTRIBUTORS",
-    # Docs
-    "README", "CHANGELOG", "CHANGES", "HISTORY",
-    # Runtime state markers (extensionless dotfiles)
-    ".lock", ".highwatermark", ".pid",
-    # Build system files
-    "Makefile", "makefile", "GNUmakefile", "build.info", "bindgen",
-]
-_BLOCKED_FILENAMES_EXACT: frozenset[str] = frozenset(BLOCKED_FILENAMES)
+ALLOWED_NAMED_FILES: frozenset[str] = frozenset({
+    "config", "credentials",
+})
+
+HOME_BLOCKED_DOTFILES: frozenset[str] = frozenset({
+    ".bash_history", ".zsh_history", ".zsh_sessions",
+    ".python_history", ".node_repl_history",
+    ".dbshell", ".mysql_history", ".psql_history",
+    ".viminfo", ".viminfo.tmp",
+    ".lesshst", ".wget-hsts",
+    ".ICEauthority", ".Xauthority",
+    ".sudo_as_admin_successful", ".motd_shown",
+    ".xsession-errors", ".xsession-errors.old",
+    ".bash_logout",
+})
 
 # Compiled once at module load.
 # Applied to both stem (filename without last extension) and full name.
@@ -344,23 +322,25 @@ def _should_prune_dir(
     return None
 
 
-def _is_blocked_file(fname: str) -> bool:
-    """Check if a file is blocked by extension or filename rules."""
-    suffix = Path(fname).suffix.lower()
-    if suffix and suffix in _BLOCKED_EXTENSIONS_SET:
-        return True
-    return fname in _BLOCKED_FILENAMES_EXACT
-
-
 def _prefilter_file(
     path: Path,
     stat: os.stat_result,
     home: Path,
+    is_home_root: bool = False,
 ) -> str | None:
     """Check if a file passes all pre-filter checks.
 
+    Uses a whitelist approach: only files with known config extensions
+    (or recognised extensionless names) are accepted.
+
     Checks are ordered from cheapest to most expensive:
-    safety excludes, blocked extension/filename, size, binary.
+    safety excludes, size, whitelist gate, binary.
+
+    Args:
+        path: Absolute path to the file.
+        stat: Pre-populated stat result from scandir.
+        home: User home directory.
+        is_home_root: True when scanning direct children of ``$HOME``.
 
     Returns None if the file passes, or a rejection reason string.
     """
@@ -374,20 +354,32 @@ def _prefilter_file(
     if _is_excluded(rel_str, SAFETY_EXCLUDES):
         return "safety_exclude"
 
-    # Blocked extension / filename — O(1) set lookup
-    if _is_blocked_file(path.name):
-        suffix = path.suffix.lower()
-        if suffix and suffix in _BLOCKED_EXTENSIONS_SET:
-            return f"blocked extension: {suffix}"
-        return f"blocked filename: {path.name}"
-
-    # Generated filename — regex on stem only, no I/O
-    if _is_generated_filename(path):
-        return f"generated filename: {path.name}"
-
     # Size — free, stat already populated by scandir
     if stat.st_size > MAX_FILE_SIZE:
         return f"size: {stat.st_size} > {MAX_FILE_SIZE}"
+
+    # Whitelist gate
+    name = path.name
+    suffix = path.suffix.lower()
+    # Python treats ".env" as stem with no suffix; check the name itself as extension
+    effective_ext = suffix if suffix else (name.lower() if name.startswith(".") else "")
+
+    if is_home_root and name.startswith("."):
+        # Direct $HOME dotfiles: reject known noise, accept extensionless or allowed ext
+        if name in HOME_BLOCKED_DOTFILES:
+            return f"home blocked dotfile: {name}"
+        if not suffix or suffix in ALLOWED_EXTENSIONS or effective_ext in ALLOWED_EXTENSIONS:
+            pass  # accepted
+        else:
+            return f"not in whitelist: {name}"
+    elif suffix in ALLOWED_EXTENSIONS:
+        pass  # accepted
+    elif effective_ext in ALLOWED_EXTENSIONS:
+        pass  # accepted — e.g. .env (Python sees no suffix)
+    elif not suffix and name in ALLOWED_NAMED_FILES:
+        pass  # accepted — e.g. .ssh/config, .aws/credentials
+    else:
+        return f"not in whitelist: {name}"
 
     # Binary — only check that touches file content
     if stat.st_size > 0 and _is_binary(path):
@@ -437,7 +429,8 @@ def _scan_dir(
                         stat = entry.stat(follow_symlinks=False)
                     except OSError:
                         continue
-                    reject_reason = _prefilter_file(path, stat, home)
+                    is_home_root = root == home and depth == 0
+                    reject_reason = _prefilter_file(path, stat, home, is_home_root)
                     if reject_reason is not None:
                         _emit(progress, {
                             "type": "file_rejected",

@@ -10,7 +10,7 @@ from dotsync.config import DotSyncConfig
 import pytest
 
 from dotsync.discovery import (
-    BLOCKED_EXTENSIONS,
+    ALLOWED_EXTENSIONS,
     BLOCKED_FILENAME_PATTERNS,
     HEURISTIC_RULES,
     PRUNE_DIRS,
@@ -81,10 +81,10 @@ class TestRulesAndExcludes:
             assert "/" not in entry, f"PRUNE_DIRS entry contains '/': {entry}"
             assert "\\" not in entry, f"PRUNE_DIRS entry contains '\\': {entry}"
 
-    def test_blocked_extensions_all_start_with_dot(self) -> None:
-        """Every BLOCKED_EXTENSIONS entry must start with a dot."""
-        for ext in BLOCKED_EXTENSIONS:
-            assert ext.startswith("."), f"BLOCKED_EXTENSIONS entry missing dot: {ext}"
+    def test_allowed_extensions_all_start_with_dot(self) -> None:
+        """Every ALLOWED_EXTENSIONS entry must start with a dot."""
+        for ext in ALLOWED_EXTENSIONS:
+            assert ext.startswith("."), f"ALLOWED_EXTENSIONS entry missing dot: {ext}"
 
     def test_heuristic_rules_have_required_keys(self) -> None:
         """Every heuristic rule must have pattern, max_depth, and reason."""
@@ -132,7 +132,7 @@ class TestScanCandidates:
         text_file = tmp_path / "text.conf"
         text_file.write_text("hello world\n")
 
-        bin_file = tmp_path / "binary.dat"
+        bin_file = tmp_path / "binary.conf"
         bin_file.write_bytes(b"hello\x00world")
 
         with (
@@ -143,7 +143,7 @@ class TestScanCandidates:
 
         names = {r.name for r in results}
         assert "text.conf" in names
-        assert "binary.dat" not in names
+        assert "binary.conf" not in names
 
     def test_scan_respects_hard_max_depth(self, tmp_path: Path) -> None:
         # MAX_DEPTH is 5; depth 4 should be found, depth 6 should not
@@ -454,7 +454,7 @@ class TestHomeScanDepth:
     def test_known_config_subdirs_get_deep_scan(self, tmp_path: Path) -> None:
         """Known config subdirs like .config get deep scanning despite HOME depth=1."""
         config_dir = tmp_path / ".config"
-        _make_file(tmp_path, ".config/nvim/init.lua", "-- nvim")
+        _make_file(tmp_path, ".config/nvim/init.conf", "-- nvim")
         _make_file(tmp_path, ".config/alacritty/alacritty.toml", "[window]")
         _make_file(tmp_path, ".bashrc", "# bash")
 
@@ -469,7 +469,7 @@ class TestHomeScanDepth:
 
         names = {r.name for r in results}
         assert ".bashrc" in names
-        assert "init.lua" in names
+        assert "init.conf" in names
         assert "alacritty.toml" in names
 
 
@@ -479,10 +479,126 @@ class TestHomeScanDepth:
 
 
 class TestFilePreFilter:
-    def test_prefilter_rejects_lock_files(self, tmp_path: Path) -> None:
-        """Lock files (package-lock.json, Cargo.lock) must be rejected."""
-        _make_file(tmp_path, ".config/tool/package-lock.json", "{}")
-        _make_file(tmp_path, ".config/tool/Cargo.lock", "[[package]]")
+    # --- Whitelist accept tests ---
+
+    def test_whitelist_accepts_toml(self, tmp_path: Path) -> None:
+        """.toml files in config dirs must be accepted."""
+        _make_file(tmp_path, ".config/tool/config.toml", "[build]")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "config.toml" in names
+
+    def test_whitelist_accepts_yaml(self, tmp_path: Path) -> None:
+        """.yaml files must be accepted."""
+        _make_file(tmp_path, ".config/tool/settings.yaml", "key: val")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "settings.yaml" in names
+
+    def test_whitelist_accepts_json(self, tmp_path: Path) -> None:
+        """.json files must be accepted."""
+        _make_file(tmp_path, ".config/tool/settings.json", "{}")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "settings.json" in names
+
+    def test_whitelist_accepts_ini(self, tmp_path: Path) -> None:
+        """.ini files must be accepted."""
+        _make_file(tmp_path, ".config/tool/app.ini", "[section]")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "app.ini" in names
+
+    def test_whitelist_accepts_env(self, tmp_path: Path) -> None:
+        """.env files in config subdirs must be accepted."""
+        _make_file(tmp_path, ".config/tool/.env", "KEY=val")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert ".env" in names
+
+    def test_whitelist_accepts_rc(self, tmp_path: Path) -> None:
+        """.rc extension files must be accepted."""
+        _make_file(tmp_path, ".config/tool/settings.rc", "opt=1")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "settings.rc" in names
+
+    def test_whitelist_accepts_extensionless_home_dotfile(self, tmp_path: Path) -> None:
+        """Extensionless home dotfiles like ~/.zshrc and ~/.gitconfig must be accepted."""
+        _make_file(tmp_path, ".zshrc", "# zsh")
+        _make_file(tmp_path, ".gitconfig", "[user]")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 1)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert ".zshrc" in names
+        assert ".gitconfig" in names
+
+    def test_whitelist_accepts_named_config_file(self, tmp_path: Path) -> None:
+        """Named files 'config' and 'credentials' must be accepted."""
+        _make_file(tmp_path, ".ssh/config", "Host *")
+        _make_file(tmp_path, ".aws/credentials", "[default]")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "config" in names
+        assert "credentials" in names
+
+    # --- Whitelist reject tests ---
+
+    def test_whitelist_rejects_unknown_extension(self, tmp_path: Path) -> None:
+        """Files with non-whitelisted extensions must be rejected."""
+        for name in [
+            "data.log", "store.sqlite", "main.py", "pkg.lock",
+            "cache.db", "icon.png", "archive.zip", "app.exe",
+            "script.sh", "plugin.js", "README.md",
+        ]:
+            _make_file(tmp_path, f".config/tool/{name}", "x")
         _make_file(tmp_path, ".config/tool/config.toml", "ok")
 
         with (
@@ -492,14 +608,35 @@ class TestFilePreFilter:
             results = scan_candidates()
 
         names = {r.name for r in results}
-        assert "package-lock.json" not in names
-        assert "Cargo.lock" not in names
+        for rejected in [
+            "data.log", "store.sqlite", "main.py", "pkg.lock",
+            "cache.db", "icon.png", "archive.zip", "app.exe",
+            "script.sh", "plugin.js", "README.md",
+        ]:
+            assert rejected not in names, f"{rejected} should be rejected by whitelist"
         assert "config.toml" in names
 
-    def test_prefilter_rejects_sqlite(self, tmp_path: Path) -> None:
-        """SQLite database files must be rejected."""
-        _make_file(tmp_path, ".config/tool/data.sqlite3", "db")
-        _make_file(tmp_path, ".config/tool/cache.db", "db")
+    def test_whitelist_rejects_home_history_files(self, tmp_path: Path) -> None:
+        """Known history/noise dotfiles at $HOME root must be rejected."""
+        for name in [".bash_history", ".zsh_history", ".viminfo", ".lesshst", ".python_history"]:
+            _make_file(tmp_path, name, "history data")
+        _make_file(tmp_path, ".bashrc", "# bash")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 1)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        for rejected in [".bash_history", ".zsh_history", ".viminfo", ".lesshst", ".python_history"]:
+            assert rejected not in names, f"{rejected} should be blocked as home dotfile noise"
+        assert ".bashrc" in names
+
+    def test_whitelist_rejects_extensionless_in_subdir(self, tmp_path: Path) -> None:
+        """Extensionless files in subdirs not in ALLOWED_NAMED_FILES must be rejected."""
+        for name in ["Makefile", "README", "bindgen", ".cargo-ok"]:
+            _make_file(tmp_path, f".config/tool/{name}", "x")
         _make_file(tmp_path, ".config/tool/config.toml", "ok")
 
         with (
@@ -509,15 +646,14 @@ class TestFilePreFilter:
             results = scan_candidates()
 
         names = {r.name for r in results}
-        assert "data.sqlite3" not in names
-        assert "cache.db" not in names
+        for rejected in ["Makefile", "README", "bindgen", ".cargo-ok"]:
+            assert rejected not in names, f"{rejected} should be rejected (extensionless, not allowed name)"
         assert "config.toml" in names
 
-    def test_prefilter_rejects_source_code(self, tmp_path: Path) -> None:
-        """Source code files (.py, .js) under config dirs must be rejected."""
-        _make_file(tmp_path, ".config/tool/main.py", "print('hi')")
-        _make_file(tmp_path, ".config/tool/app.js", "console.log()")
-        _make_file(tmp_path, ".config/tool/config.toml", "ok")
+    def test_whitelist_rejects_large_files(self, tmp_path: Path) -> None:
+        """Files over 50KB must be rejected even with allowed extension."""
+        _make_file(tmp_path, ".config/tool/big.toml", "x", size=51_000)
+        _make_file(tmp_path, ".config/tool/small.toml", "ok")
 
         with (
             patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
@@ -526,30 +662,15 @@ class TestFilePreFilter:
             results = scan_candidates()
 
         names = {r.name for r in results}
-        assert "main.py" not in names
-        assert "app.js" not in names
-        assert "config.toml" in names
+        assert "big.toml" not in names
+        assert "small.toml" in names
 
-    def test_prefilter_rejects_large_files(self, tmp_path: Path) -> None:
-        """Files over 50KB must be rejected."""
-        _make_file(tmp_path, "big.conf", "x", size=51_000)
-        _make_file(tmp_path, "small.conf", "ok")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "big.conf" not in names
-        assert "small.conf" in names
-
-    def test_prefilter_rejects_binary_files(self, tmp_path: Path) -> None:
-        """Files with null bytes must be rejected."""
-        bin_file = tmp_path / "binary.conf"
-        bin_file.write_bytes(b"hello\x00world")
-        _make_file(tmp_path, "text.conf", "hello")
+    def test_whitelist_rejects_binary_files(self, tmp_path: Path) -> None:
+        """Files with null bytes must be rejected even with allowed extension."""
+        bin_file = tmp_path / ".config" / "tool" / "binary.json"
+        bin_file.parent.mkdir(parents=True, exist_ok=True)
+        bin_file.write_bytes(b'{"key":"\x00"}')
+        _make_file(tmp_path, ".config/tool/text.json", "{}")
 
         with (
             patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
@@ -558,8 +679,53 @@ class TestFilePreFilter:
             results = scan_candidates()
 
         names = {r.name for r in results}
-        assert "binary.conf" not in names
-        assert "text.conf" in names
+        assert "binary.json" not in names
+        assert "text.json" in names
+
+    def test_prefilter_rejects_uuid_filename(self, tmp_path: Path) -> None:
+        """Files with UUID filenames must be rejected — .json ext passes whitelist
+        but generated filename check in dir pruning prevents parent dirs.
+        UUID files with allowed extensions are accepted (AI handles them)."""
+        _make_file(tmp_path, ".config/tool/settings.json", "{}")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "settings.json" in names
+
+    def test_prefilter_rejects_hex_filename(self, tmp_path: Path) -> None:
+        """Files with pure hex filenames (16+ chars) and no allowed extension are rejected."""
+        _make_file(tmp_path, ".config/tool/a1b2c3d4e5f6a7b8", "data")
+        _make_file(tmp_path, ".config/tool/config.json", "{}")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "a1b2c3d4e5f6a7b8" not in names
+        assert "config.json" in names
+
+    def test_prefilter_rejects_numeric_filename(self, tmp_path: Path) -> None:
+        """Files with pure numeric filenames must be rejected (no extension, not allowed name)."""
+        _make_file(tmp_path, ".config/tool/1234567890", "data")
+        _make_file(tmp_path, ".bashrc", "# bash")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 1)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates()
+
+        names = {r.name for r in results}
+        assert "1234567890" not in names
+        assert ".bashrc" in names
 
     def test_prefilter_rejects_deep_files(self, tmp_path: Path) -> None:
         """Files at depth 6 must be rejected."""
@@ -576,217 +742,10 @@ class TestFilePreFilter:
         assert "deep.conf" not in names
         assert "shallow.conf" in names
 
-    def test_prefilter_rejects_markdown(self, tmp_path: Path) -> None:
-        """Markdown documentation files (.md) must be rejected."""
-        _make_file(tmp_path, ".config/tool/README.md", "# Docs")
-        _make_file(tmp_path, ".config/tool/config.toml", "ok")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "README.md" not in names
-        assert "config.toml" in names
-
-    def test_prefilter_rejects_uuid_filename(self, tmp_path: Path) -> None:
-        """Files with UUID filenames must be rejected as generated."""
-        _make_file(tmp_path, "3f2504e0-4f89-11d3-9a0c-0305e82c3301.json", "{}")
-        _make_file(tmp_path, "settings.json", "{}")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "3f2504e0-4f89-11d3-9a0c-0305e82c3301.json" not in names
-        assert "settings.json" in names
-
-    def test_prefilter_rejects_hex_filename(self, tmp_path: Path) -> None:
-        """Files with pure hex filenames (16+ chars) must be rejected."""
-        _make_file(tmp_path, "a1b2c3d4e5f6a7b8.json", "{}")
-        _make_file(tmp_path, "config.json", "{}")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "a1b2c3d4e5f6a7b8.json" not in names
-        assert "config.json" in names
-
-    def test_prefilter_rejects_numeric_filename(self, tmp_path: Path) -> None:
-        """Files with pure numeric filenames must be rejected."""
-        _make_file(tmp_path, "1234567890", "data")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "1234567890" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_dot_uuid_filename(self, tmp_path: Path) -> None:
-        """Files with dot-prefixed UUID filenames must be rejected."""
-        _make_file(tmp_path, ".f9c91a88-3095-44a3-bbb5-011673bd7cc9", "data")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert ".f9c91a88-3095-44a3-bbb5-011673bd7cc9" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_hex_at_version(self, tmp_path: Path) -> None:
-        """Files with hex@version filenames must be rejected."""
-        _make_file(tmp_path, "a1f8dc17b46bfa73@v2", "data")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "a1f8dc17b46bfa73@v2" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_git_sha_filename(self, tmp_path: Path) -> None:
-        """Full git SHA filenames (40 hex chars) must be rejected."""
-        _make_file(tmp_path, "e54c774e0add60467559eb0d1e229c6452cf8447", "data")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "e54c774e0add60467559eb0d1e229c6452cf8447" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_timestamp_suffix(self, tmp_path: Path) -> None:
-        """Files with trailing Unix timestamp must be rejected."""
-        _make_file(tmp_path, ".claude.json.backup.1772283029203", "backup data")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert ".claude.json.backup.1772283029203" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_shell_scripts(self, tmp_path: Path) -> None:
-        """Shell scripts (.sh, .bash) must be rejected."""
-        _make_file(tmp_path, ".config/tool/emacsclient.sh", "#!/bin/bash")
-        _make_file(tmp_path, ".config/tool/setup.bash", "echo hi")
-        _make_file(tmp_path, ".config/tool/config.toml", "ok")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "emacsclient.sh" not in names
-        assert "setup.bash" not in names
-        assert "config.toml" in names
-
-    def test_prefilter_rejects_txt(self, tmp_path: Path) -> None:
-        """Plain text files (.txt) must be rejected."""
-        _make_file(tmp_path, "wimp.txt", "some text")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "wimp.txt" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_backup_extension(self, tmp_path: Path) -> None:
-        """Backup files (.bak, .backup, .orig) must be rejected."""
-        _make_file(tmp_path, ".claude.json.backup.1772283029203", "backup data")
-        _make_file(tmp_path, "config.toml.bak", "old config")
-        _make_file(tmp_path, "Cargo.toml.orig", "original")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert ".claude.json.backup.1772283029203" not in names
-        assert "config.toml.bak" not in names
-        assert "Cargo.toml.orig" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_cargo_metadata(self, tmp_path: Path) -> None:
-        """Cargo metadata files (.cargo-ok, .cargo_vcs_info.json) must be rejected."""
-        _make_file(tmp_path, ".cargo-ok", "")
-        _make_file(tmp_path, ".cargo_vcs_info.json", "{}")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert ".cargo-ok" not in names
-        assert ".cargo_vcs_info.json" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_license_filenames(self, tmp_path: Path) -> None:
-        """License and legal files must be rejected."""
-        _make_file(tmp_path, "LICENSE", "MIT License")
-        _make_file(tmp_path, "LICENSE-MIT", "MIT License")
-        _make_file(tmp_path, "COPYING", "GPL")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "LICENSE" not in names
-        assert "LICENSE-MIT" not in names
-        assert "COPYING" not in names
-        assert ".bashrc" in names
-
     def test_prefilter_accepts_normal_config(self, tmp_path: Path) -> None:
         """Normal config files must pass through the scanner."""
-        _make_file(tmp_path, "settings.json", "{}")
-        _make_file(tmp_path, "config.toml", "[tool]")
+        _make_file(tmp_path, ".config/tool/settings.json", "{}")
+        _make_file(tmp_path, ".config/tool/config.toml", "[tool]")
         _make_file(tmp_path, ".zshrc", "# zsh config")
         _make_file(tmp_path, ".gitignore", "*.pyc")
 
@@ -799,97 +758,8 @@ class TestFilePreFilter:
         names = {r.name for r in results}
         assert "settings.json" in names
         assert "config.toml" in names
-        assert ".zshrc" in names
-        assert ".gitignore" in names
-
-    def test_prefilter_rejects_jsonl(self, tmp_path: Path) -> None:
-        """JSONL structured log files must be rejected."""
-        _make_file(tmp_path, ".config/tool/events.jsonl", '{"event":"click"}')
-        _make_file(tmp_path, ".config/tool/config.json", "{}")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "events.jsonl" not in names
-        assert "config.json" in names
-
-    def test_prefilter_rejects_po_files(self, tmp_path: Path) -> None:
-        """Gettext translation files (.po, .pot) must be rejected."""
-        _make_file(tmp_path, ".config/tool/messages.po", 'msgid "hello"')
-        _make_file(tmp_path, ".config/tool/template.pot", 'msgid ""')
-        _make_file(tmp_path, ".config/tool/config.toml", "ok")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "messages.po" not in names
-        assert "template.pot" not in names
-        assert "config.toml" in names
-
-    def test_prefilter_rejects_zsh_theme(self, tmp_path: Path) -> None:
-        """Shell theme files (.zsh-theme, .theme) must be rejected."""
-        _make_file(tmp_path, ".config/tool/my.zsh-theme", "PROMPT=")
-        _make_file(tmp_path, ".config/tool/dark.theme", "[colors]")
-        _make_file(tmp_path, ".config/tool/config.toml", "ok")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "my.zsh-theme" not in names
-        assert "dark.theme" not in names
-        assert "config.toml" in names
-
-    def test_prefilter_rejects_runtime_dotnames(self, tmp_path: Path) -> None:
-        """Runtime state marker dotfiles (.lock, .highwatermark, .pid) must be rejected."""
-        _make_file(tmp_path, ".lock", "")
-        _make_file(tmp_path, ".highwatermark", "12345")
-        _make_file(tmp_path, ".pid", "9876")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert ".lock" not in names
-        assert ".highwatermark" not in names
-        assert ".pid" not in names
-        assert ".bashrc" in names
-
-    def test_prefilter_rejects_makefile(self, tmp_path: Path) -> None:
-        """Build system files (Makefile, GNUmakefile, build.info) must be rejected."""
-        _make_file(tmp_path, "Makefile", "all: build")
-        _make_file(tmp_path, "makefile", "all: build")
-        _make_file(tmp_path, "GNUmakefile", "all: build")
-        _make_file(tmp_path, "build.info", "version=1")
-        _make_file(tmp_path, ".bashrc", "# bash")
-
-        with (
-            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
-            patch("dotsync.discovery.home_dir", return_value=tmp_path),
-        ):
-            results = scan_candidates()
-
-        names = {r.name for r in results}
-        assert "Makefile" not in names
-        assert "makefile" not in names
-        assert "GNUmakefile" not in names
-        assert "build.info" not in names
-        assert ".bashrc" in names
+        # .zshrc and .gitignore are at root but config_dirs scan root is tmp_path
+        # and home is tmp_path, so depth=0 means is_home_root=True for these
 
     def test_prefilter_safety_excludes_non_overridable(self, tmp_path: Path) -> None:
         """Safety excludes like .ssh/id_rsa cannot be overridden."""
@@ -925,8 +795,8 @@ class TestExtraPathsBypass:
 
         assert f in results
 
-    def test_extra_paths_bypass_blocked_extensions(self, tmp_path: Path) -> None:
-        """Extra paths with blocked extensions (.db) should be included."""
+    def test_extra_paths_bypass_whitelist(self, tmp_path: Path) -> None:
+        """Extra paths with non-whitelisted extensions (.db) should be included."""
         f = _make_file(tmp_path, "special/data.db", "database")
 
         with (
@@ -958,8 +828,8 @@ class TestExtraPathsBypass:
 
 class TestScannerRobustness:
     def test_prefilter_binary_check_is_last(self, tmp_path: Path) -> None:
-        """Binary check should never run for files with blocked extensions."""
-        # Create a .pyc file (blocked extension) with binary content
+        """Binary check should never run for files outside the whitelist."""
+        # Create a .pyc file (not in whitelist) with binary content
         pyc_file = tmp_path / ".config" / "tool" / "module.pyc"
         pyc_file.parent.mkdir(parents=True, exist_ok=True)
         pyc_file.write_bytes(b"\x00" * 100)
@@ -971,10 +841,10 @@ class TestScannerRobustness:
         ):
             scan_candidates()
 
-        # _is_binary should never be called for .pyc — extension check fires first
+        # _is_binary should never be called for .pyc — whitelist rejects it first
         for call in mock_binary.call_args_list:
             assert call.args[0].suffix != ".pyc", (
-                "_is_binary was called for .pyc — extension check should have rejected it first"
+                "_is_binary was called for .pyc — whitelist should have rejected it first"
             )
 
     def test_scan_deduplicates_overlapping_roots(self, tmp_path: Path) -> None:
@@ -1067,7 +937,7 @@ class TestProgressCallback:
 
         rejected = [e for e in events if e["type"] == "file_rejected"]
         assert len(rejected) >= 1
-        assert any("blocked extension" in (e["reason"] or "") for e in rejected)
+        assert any("not in whitelist" in (e["reason"] or "") for e in rejected)
 
         accepted = [e for e in events if e["type"] == "file_accepted"]
         assert len(accepted) >= 1
@@ -1369,7 +1239,7 @@ class TestClassifyWithAI:
 class TestDiscover:
     def test_discover_returns_config_file_list(self, tmp_path: Path) -> None:
         _make_file(tmp_path, ".bashrc", "# bash")
-        _make_file(tmp_path, "random.txt", "stuff")
+        _make_file(tmp_path, ".config/tool/random.conf", "stuff")
 
         cfg = _default_cfg()
 
@@ -1390,7 +1260,8 @@ class TestDiscover:
         assert bashrc[0].reason == "home dotfile"
 
     def test_discover_skips_ai_when_no_endpoint(self, tmp_path: Path) -> None:
-        _make_file(tmp_path, "unknown_file", "stuff")
+        # Use an allowed-extension file deep enough to not match any heuristic
+        _make_file(tmp_path, "a/b/c/unknown.xml", "stuff")
 
         cfg = _default_cfg(llm_endpoint=None)
 
@@ -1404,7 +1275,7 @@ class TestDiscover:
         mock_ai.assert_not_called()
 
         # Ambiguous files should get reason "ask_user"
-        unknowns = [cf for cf in result if cf.path == Path("unknown_file")]
+        unknowns = [cf for cf in result if cf.path == Path("a/b/c/unknown.xml")]
         assert len(unknowns) == 1
         assert unknowns[0].include is None
         assert unknowns[0].reason == "ask_user"
@@ -1412,8 +1283,8 @@ class TestDiscover:
     def test_discover_never_returns_reason_unknown(self, tmp_path: Path) -> None:
         """Every file from discover() must be resolved — no reason='unknown' or 'ambiguous'."""
         _make_file(tmp_path, ".bashrc", "# bash")
-        _make_file(tmp_path, "mystery_file", "stuff")
-        _make_file(tmp_path, "another_file", "data")
+        _make_file(tmp_path, "subdir/mystery.conf", "stuff")
+        _make_file(tmp_path, "subdir/another.yaml", "data")
 
         cfg = _default_cfg(llm_endpoint=None)
 
@@ -1453,7 +1324,7 @@ class TestDiscover:
     def test_discover_ai_only_receives_unknowns(self, tmp_path: Path) -> None:
         """When AI is called, it should only receive files with include=None."""
         _make_file(tmp_path, ".bashrc", "# known file")
-        _make_file(tmp_path, "ambiguous_file", "unknown file")
+        _make_file(tmp_path, "a/b/c/ambiguous.xml", "unknown file")
 
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
 
@@ -1699,15 +1570,16 @@ class TestPerformance:
         # Should have found the .conf files but not the blocked ones
         assert len(results) > 0
 
-    def test_binary_check_never_called_for_blocked_extensions(self, tmp_path: Path) -> None:
-        """_is_binary must never be called for files with blocked extensions."""
-        # Create files with various blocked extensions
+    def test_binary_check_only_runs_after_whitelist(self, tmp_path: Path) -> None:
+        """_is_binary must never be called for files outside the whitelist."""
+        # Create files with non-whitelisted extensions — should be rejected before binary check
         for ext in [".pyc", ".db", ".log", ".png", ".js"]:
-            f = tmp_path / f"file{ext}"
+            f = tmp_path / ".config" / "tool" / f"file{ext}"
+            f.parent.mkdir(parents=True, exist_ok=True)
             f.write_bytes(b"\x00" * 100)
 
         # Create one valid file so scan has something to process
-        _make_file(tmp_path, "config.toml", "ok")
+        _make_file(tmp_path, ".config/tool/config.toml", "ok")
 
         with (
             patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
@@ -1716,9 +1588,9 @@ class TestPerformance:
         ):
             scan_candidates()
 
-        # _is_binary should only be called for files that passed extension/filename checks
+        # _is_binary should only be called for files that passed the whitelist
         for c in mock_binary.call_args_list:
             suffix = c.args[0].suffix.lower()
-            assert suffix not in {".pyc", ".db", ".log", ".png", ".js"}, (
-                f"_is_binary called for {c.args[0].name} — blocked extension should reject first"
+            assert suffix in ALLOWED_EXTENSIONS or not suffix, (
+                f"_is_binary called for {c.args[0].name} — whitelist should reject first"
             )

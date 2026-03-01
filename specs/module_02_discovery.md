@@ -20,20 +20,19 @@ Paths matching these patterns are **never** included — security invariants:
 dotsync.key
 ```
 
-### `SCAN_EXCLUDES` (list)
+### `PRUNE_DIRS` / `_PRUNE_PREFIXES`
 
-Directories skipped during scanning to avoid noise:
+Directories pruned during scanning — by exact name match or prefix:
 
-```
-.cache/
-.local/share/
-.local/lib/
-node_modules/
-__pycache__/
-.git/
-.venv/
-venv/
-.tox/
+- **PRUNE_DIRS**: ~33 directory names (`.git`, `node_modules`, `__pycache__`, cache dirs, build dirs, IDE state, AI agent state, etc.)
+- **_PRUNE_PREFIXES**: `.local/share/`, `.local/lib/`
+
+### Whitelist constants
+
+```python
+ALLOWED_EXTENSIONS: frozenset[str]  # 14 config extensions (.toml, .yaml, .json, .ini, .cfg, .conf, .xml, .env, .rc, .plist, etc.)
+ALLOWED_NAMED_FILES: frozenset[str]  # extensionless names: "config", "credentials"
+HOME_BLOCKED_DOTFILES: frozenset[str]  # ~18 known noise dotfiles (.bash_history, .viminfo, .lesshst, etc.)
 ```
 
 ### `HEURISTIC_RULES` (list[dict])
@@ -57,7 +56,8 @@ Structural rules evaluated in order; first match wins:
 ### Constants
 
 - `MAX_DEPTH = 5` — hard ceiling for filesystem walk
-- `MAX_FILE_SIZE = 512_000` — skip files larger than 512 KB
+- `MAX_FILE_SIZE = 50_000` — skip files larger than 50 KB
+- `BINARY_CHECK_BYTES = 512` — bytes to read for binary detection
 
 ### Tests
 
@@ -79,11 +79,12 @@ Walk each root returned by `config_dirs()`:
 |---|---|
 | No symlink following | `followlinks=False`; skip symlink dirs and files |
 | Max depth | 5 levels below each root |
-| Size gate | Skip files > 512 KB |
-| Binary gate | Read first 8 KB; skip if `\x00` found |
+| Dir pruning | `PRUNE_DIRS` (name), `_PRUNE_PREFIXES` (prefix), safety excludes, `repo_path`, generated dir names |
 | Safety excludes | `fnmatch` against `SAFETY_EXCLUDES` for files |
-| Scan excludes | Filter `dirnames` against `SCAN_EXCLUDES` to prune noise dirs |
-| Extra paths | Append `extra_paths` if they exist on disk **and pass `SAFETY_EXCLUDES`** |
+| Size gate | Skip files > 50 KB |
+| Whitelist gate | Accept `ALLOWED_EXTENSIONS`, `ALLOWED_NAMED_FILES`, extensionless home dotfiles; reject `HOME_BLOCKED_DOTFILES` |
+| Binary gate | Read first 512 bytes; skip if `\x00` found (runs last — only for whitelist-passing files) |
+| Extra paths | Append `extra_paths` if they exist on disk **and pass `SAFETY_EXCLUDES`** (bypass whitelist) |
 | Dedup | By `Path.resolve()` |
 
 Returns a deduplicated `list[Path]` of absolute paths.
