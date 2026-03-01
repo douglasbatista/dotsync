@@ -217,5 +217,14 @@
   - Manual smoke testing of all CLI workflows: init, status, config, discover, sync, restore, rollback
   - Total test count: 277 (254 unit + 15 integration + 6 e2e + 2 perf deselected)
 
+### Added (continued)
+- README.md with user-facing project documentation
+  - Features overview, quick start guide, CLI command reference table
+  - Configuration field reference and `--set` usage example
+  - Security model documentation (git-crypt, SENSITIVE_PATTERNS, NEVER_INCLUDE, SAFETY_EXCLUDES, interactive I/E/S)
+  - AI triage setup (LiteLLM, OpenRouter, Ollama compatibility)
+  - Development prerequisites and setup commands
+  - Project structure tree with module descriptions
+
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest

@@ -137,6 +137,9 @@
   - [x] `pytest.mark.integration` and `pytest.mark.e2e` markers in `pyproject.toml`
   - [x] 277 tests total (254 unit + 15 integration + 6 e2e + 2 perf deselected)
 
+- [x] README.md with user-facing documentation
+  - [x] Features, quick start, command reference, configuration, security, AI triage, development, and project structure sections
+
 ### In Progress
 - (none)
 
