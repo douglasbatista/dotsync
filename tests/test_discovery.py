@@ -208,6 +208,40 @@ class TestScanCandidates:
 
 
 class TestSubtreePruning:
+    def test_prune_skips_repo_path(self, tmp_path: Path) -> None:
+        """repo_path directory must be excluded from scan even if under $HOME."""
+        repo = tmp_path / "dotsync-repo"
+        _make_file(tmp_path, "dotsync-repo/manifest.json", "{}")
+        _make_file(tmp_path, "dotsync-repo/configs/.bashrc", "# synced")
+        _make_file(tmp_path, ".bashrc", "# bash")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates(repo_path=repo)
+
+        rel_strs = {str(r.relative_to(tmp_path)) for r in results}
+        assert "dotsync-repo/manifest.json" not in rel_strs
+        assert "dotsync-repo/configs/.bashrc" not in rel_strs
+        assert ".bashrc" in rel_strs
+
+    def test_prune_skips_repo_path_custom_name(self, tmp_path: Path) -> None:
+        """repo_path is excluded by resolved path, not by name — works for any name."""
+        repo = tmp_path / "my-dots"
+        _make_file(tmp_path, "my-dots/settings.json", "{}")
+        _make_file(tmp_path, ".zshrc", "# zsh")
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            results = scan_candidates(repo_path=repo)
+
+        rel_strs = {str(r.relative_to(tmp_path)) for r in results}
+        assert "my-dots/settings.json" not in rel_strs
+        assert ".zshrc" in rel_strs
+
     def test_prune_skips_node_modules_subtree(self, tmp_path: Path) -> None:
         """Files deep inside node_modules/ must be pruned."""
         _make_file(tmp_path, ".config/tool/node_modules/deep/file.json", "{}")

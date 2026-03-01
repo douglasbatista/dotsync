@@ -315,8 +315,12 @@ def _is_excluded(rel_str: str, patterns: list[str]) -> bool:
     return False
 
 
-def _should_prune_dir(entry: os.DirEntry[str], home: Path) -> str | None:
-    """Check if a directory should be pruned by name, prefix, or safety.
+def _should_prune_dir(
+    entry: os.DirEntry[str],
+    home: Path,
+    repo_path: Path | None = None,
+) -> str | None:
+    """Check if a directory should be pruned by name, prefix, safety, or repo path.
 
     Returns None if the directory should not be pruned, or a reason string.
     """
@@ -333,6 +337,8 @@ def _should_prune_dir(entry: os.DirEntry[str], home: Path) -> str | None:
             return f"prefix match: {prefix}"
     if _is_excluded(rel_slash, SAFETY_EXCLUDES):
         return "safety_exclude"
+    if repo_path is not None and Path(entry.path).resolve() == repo_path.resolve():
+        return "repo_path"
     if _is_generated_filename(Path(name)):
         return "generated dir name"
     return None
@@ -395,6 +401,7 @@ def _scan_dir(
     depth: int,
     max_depth: int,
     home: Path,
+    repo_path: Path | None = None,
     progress: ProgressCallback | None = None,
 ) -> list[Path]:
     """Recursively scan a directory using os.scandir().
@@ -408,7 +415,7 @@ def _scan_dir(
         with os.scandir(root) as it:
             for entry in it:
                 if entry.is_dir(follow_symlinks=False):
-                    prune_reason = _should_prune_dir(entry, home)
+                    prune_reason = _should_prune_dir(entry, home, repo_path)
                     if prune_reason is not None:
                         _emit(progress, {
                             "type": "dir_pruned",
@@ -421,7 +428,7 @@ def _scan_dir(
                         candidates.extend(
                             _scan_dir(
                                 Path(entry.path), depth + 1, max_depth,
-                                home, progress,
+                                home, repo_path, progress,
                             )
                         )
                 elif entry.is_file(follow_symlinks=False):
@@ -453,6 +460,7 @@ def _scan_dir(
 
 def scan_candidates(
     extra_paths: list[Path] | None = None,
+    repo_path: Path | None = None,
     progress: ProgressCallback | None = None,
 ) -> list[Path]:
     """Scan config directories for candidate config files.
@@ -464,6 +472,8 @@ def scan_candidates(
     Args:
         extra_paths: Additional absolute paths to include.
             Bypass pruning and blocked lists but NOT safety excludes.
+        repo_path: Path to the dotfiles repository — always excluded
+            from scanning regardless of name or location.
         progress: Optional callback for real-time scan progress events.
 
     Returns:
@@ -485,7 +495,7 @@ def scan_candidates(
                     "count": None,
                 })
                 futures[executor.submit(
-                    _scan_dir, root, 0, max_depth, home, progress,
+                    _scan_dir, root, 0, max_depth, home, repo_path, progress,
                 )] = root
             for future in as_completed(futures):
                 root = futures[future]
@@ -611,7 +621,7 @@ def classify_heuristic(
             include = False
             reason = "user_excluded"
         # Check user include_extra
-        elif any(rel_str == p or str(fpath) == p for p in include_extra):
+        elif any(rel_str == str(p) or str(fpath) == str(p) for p in include_extra):
             include = True
             reason = "user_included"
         # Check heuristic rules (first match wins)
@@ -825,8 +835,8 @@ def discover(
         List of ConfigFile with classification results.
     """
     _emit(progress, {"type": "phase_start", "reason": "scan", "path": None, "count": None})
-    extra = [Path(p) for p in cfg.include_extra] if cfg.include_extra else None
-    candidates = scan_candidates(extra_paths=extra, progress=progress)
+    extra = list(cfg.include_extra) if cfg.include_extra else None
+    candidates = scan_candidates(extra_paths=extra, repo_path=cfg.repo_path, progress=progress)
     _emit(progress, {"type": "phase_done", "reason": "scan", "path": None, "count": len(candidates)})
 
     _emit(progress, {"type": "phase_start", "reason": "heuristic", "path": None, "count": None})

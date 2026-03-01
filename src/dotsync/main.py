@@ -726,8 +726,10 @@ def config(
         elif field_type is Path:
             setattr(cfg, key, Path(value))
         elif "list" in str(field_type).lower():
-            # For list fields, append or set as comma-separated
-            setattr(cfg, key, [v.strip() for v in value.split(",") if v.strip()])
+            # For list fields, split as comma-separated and coerce element type
+            parts = [v.strip() for v in value.split(",") if v.strip()]
+            coerced: list[str] | list[Path] = [Path(v) for v in parts] if "Path" in str(field_type) else parts
+            setattr(cfg, key, coerced)
         else:
             # str or Optional[str]
             setattr(cfg, key, value if value else None)

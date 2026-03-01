@@ -4,6 +4,7 @@ from dotsync.config import (
     ConfigNotFoundError,
     DotSyncConfig,
     default_config,
+    expand_path,
     load_config,
     save_config,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "DotSyncConfig",
     "default_config",
     "discover",
+    "expand_path",
     "load_config",
     "save_config",
     "setup_logging",

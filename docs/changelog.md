@@ -190,5 +190,23 @@
   - `_manifest_to_config_files()` propagates `ManifestEntry.sensitive_flagged` → `ConfigFile.sensitive` for round-trip consistency
   - 6 new tests: 4 for `_mark_sensitive()` (match, AI-flagged, unconfirmed skip, clean file), 2 for `register_new_files()` sensitive propagation
 
+### Changed (continued)
+- Configuration path expansion (Module 01 spec alignment)
+  - Added `expand_path(p, resolve)` utility function to `config.py` — expands `~`, `$HOME`, `%USERPROFILE%` via `os.path.expandvars` + `Path.expanduser()`, optionally resolves to absolute
+  - Added Pydantic `field_validator` decorators on `DotSyncConfig`:
+    - `repo_path`, `gitcrypt_key_path` — full expansion + resolve
+    - `include_extra` — full expansion + resolve for each path in list
+    - `exclude_patterns` — expanduser/expandvars only, no resolve (patterns may contain globs)
+    - `health_checks` — intentionally left unvalidated (shell handles `~` at runtime)
+  - `include_extra` field type changed from `list[str]` to `list[Path]` (spec alignment)
+  - `config --set` handler coerces list values to `Path` when field type contains `Path`
+  - `expand_path` exported from `dotsync.__init__`
+  - 11 new tests in `test_core.py`: `TestExpandPath` (4 tests) and `TestConfigPathExpansion` (7 tests)
+- Discovery scanner now accepts `repo_path` parameter (Module 02 spec alignment)
+  - `scan_candidates(repo_path=...)` threads repo path through `_scan_dir()` and `_should_prune_dir()`
+  - `_should_prune_dir()` excludes directories matching `repo_path` by resolved path comparison — works regardless of directory name
+  - `discover()` passes `cfg.repo_path` to `scan_candidates()`
+  - 2 new tests: `test_prune_skips_repo_path`, `test_prune_skips_repo_path_custom_name`
+
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest

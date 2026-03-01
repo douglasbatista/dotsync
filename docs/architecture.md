@@ -21,7 +21,8 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 ### 2. Configuration (`config.py`)
 
 - Loads/saves TOML configuration from `~/.dotsync/config.toml`
-- Uses Pydantic for schema validation
+- Uses Pydantic for schema validation with `field_validator` decorators for automatic path expansion
+- `expand_path(p, resolve)` — expands `~`, `$HOME`, `%USERPROFILE%` via `os.path.expandvars` + `Path.expanduser()`; applied to `repo_path`, `gitcrypt_key_path`, `include_extra` (full resolve) and `exclude_patterns` (expanduser only, no resolve); `health_checks` left unexpanded (shell handles `~` at runtime)
 - Default configuration stored in `DotSyncConfig` dataclass
 
 ### 3. File Discovery (`discovery.py`)
@@ -34,10 +35,10 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 - `BLOCKED_FILENAMES`: exact filenames and glob patterns rejected at file level (`package-lock.json`, `*.log`, etc.)
 - `HEURISTIC_RULES`: structural rules evaluated in order (home dotfile, XDG config, Windows AppData, config extension) with depth limits
 - `ScanEvent` TypedDict and `ProgressCallback` type alias for real-time scan progress reporting
-- `scan_candidates()`: uses `os.scandir()` with manual recursion via `_scan_dir()` for efficient scanning with `DirEntry` stat reuse. Scan roots walked in parallel via `ThreadPoolExecutor`. Two-phase filtering — Phase 1 prunes directory subtrees by name (`PRUNE_DIRS`) or prefix (`_PRUNE_PREFIXES`) + safety excludes. Phase 2 pre-filters files via `_prefilter_file()`: safety excludes, blocked extensions/filenames, size >50 KB, binary detection (512-byte check, runs last). Extra paths bypass pruning and blocked lists but not safety excludes. `PermissionError` on inaccessible dirs silently skipped. Accepts optional `progress` callback for live UI updates.
+- `scan_candidates(repo_path=...)`: uses `os.scandir()` with manual recursion via `_scan_dir()` for efficient scanning with `DirEntry` stat reuse. Scan roots walked in parallel via `ThreadPoolExecutor`. Two-phase filtering — Phase 1 prunes directory subtrees by name (`PRUNE_DIRS`), prefix (`_PRUNE_PREFIXES`), safety excludes, or resolved `repo_path` match. Phase 2 pre-filters files via `_prefilter_file()`: safety excludes, blocked extensions/filenames, size >50 KB, binary detection (512-byte check, runs last). Extra paths bypass pruning and blocked lists but not safety excludes. `PermissionError` on inaccessible dirs silently skipped. Accepts optional `progress` callback for live UI updates.
 - `classify_heuristic()`: matches against heuristic rules (first match wins), user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
 - `build_candidate_entry()`: constructs per-file payload dict (path, size, first_lines with 200-char cap, modified_days_ago) for LLM requests
-- `_should_prune_dir()`: checks `PRUNE_DIRS` (name match), `_PRUNE_PREFIXES` (prefix match), safety excludes, and generated directory names (UUID, hex, numeric) via `_is_generated_filename()`
+- `_should_prune_dir()`: checks `PRUNE_DIRS` (name match), `_PRUNE_PREFIXES` (prefix match), safety excludes, `repo_path` (resolved path comparison), and generated directory names (UUID, hex, numeric) via `_is_generated_filename()`
 - `classify_with_ai()`: sends ambiguous files to LiteLLM proxy in batches of 20 (`MAX_CANDIDATES_PER_BATCH`), caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error per batch
 - `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → mark remaining ambiguous as `ask_user`. Accepts optional `progress` callback; emits `phase_start`/`phase_done` events for each pipeline stage.
 

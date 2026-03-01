@@ -1,16 +1,25 @@
 """Configuration schema and load/save functions for DotSync."""
 
+import os
 from pathlib import Path
 
 import tomli_w
 import tomllib
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConfigNotFoundError(Exception):
     """Raised when the configuration file is missing."""
 
     pass
+
+
+def expand_path(p: str | Path | None, resolve: bool = True) -> Path | None:
+    """Expand ~ and %USERPROFILE% / $HOME env vars, then optionally resolve to absolute path."""
+    if p is None:
+        return None
+    expanded = Path(os.path.expandvars(str(p))).expanduser()
+    return expanded.resolve() if resolve else expanded
 
 
 class DotSyncConfig(BaseModel):
@@ -24,7 +33,27 @@ class DotSyncConfig(BaseModel):
     snapshot_keep: int = Field(5, description="Number of local snapshots to retain")
     health_checks: list[str] = Field(default_factory=list, description="List of health check commands")
     exclude_patterns: list[str] = Field(default_factory=list, description="Glob patterns to exclude from sync")
-    include_extra: list[str] = Field(default_factory=list, description="Additional paths to include in sync")
+    include_extra: list[Path] = Field(default_factory=list, description="Additional paths to include in sync")
+
+    @field_validator("repo_path", "gitcrypt_key_path", mode="before")
+    @classmethod
+    def expand_single_path(cls, v: str | Path | None) -> Path | None:
+        """Expand ~ and env vars for single path fields."""
+        return expand_path(v, resolve=True)
+
+    @field_validator("include_extra", mode="before")
+    @classmethod
+    def expand_path_list(cls, v: list[str | Path] | None) -> list[Path]:
+        """Expand ~ and env vars for each path in the list."""
+        return [expand_path(p, resolve=True) for p in (v or [])]  # type: ignore[misc]
+
+    @field_validator("exclude_patterns", mode="before")
+    @classmethod
+    def expand_pattern_list(cls, v: list[str] | None) -> list[str]:
+        """Expand ~ and env vars in patterns without resolving."""
+        if not v:
+            return []
+        return [str(Path(os.path.expandvars(p)).expanduser()) for p in v]
 
 
 CONFIG_DIR = Path.home() / ".dotsync"

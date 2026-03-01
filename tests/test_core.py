@@ -9,14 +9,14 @@ from rich.logging import RichHandler
 
 from dotsync.config import (
     CONFIG_FILE,
-    CONFIG_DIR,
     ConfigNotFoundError,
     DotSyncConfig,
     default_config,
+    expand_path,
     load_config,
     save_config,
 )
-from dotsync.logging_setup import LOG_FILE, setup_logging
+from dotsync.logging_setup import setup_logging
 from dotsync.platform_utils import config_dirs, current_os, home_dir, is_wsl
 
 
@@ -57,7 +57,7 @@ class TestConfig:
                         snapshot_keep=10,
                         health_checks=["git status", "git log"],
                         exclude_patterns=["*.log", "*.tmp"],
-                        include_extra=["/etc/hosts"],
+                        include_extra=[Path("/etc/hosts")],
                     )
 
                     # Save the config
@@ -192,3 +192,92 @@ class TestPlatformUtils:
         # It's mainly to ensure the function doesn't crash
         result = is_wsl()
         assert isinstance(result, bool)
+
+
+class TestExpandPath:
+    """Tests for the expand_path utility function."""
+
+    def test_expand_path_none(self) -> None:
+        """Test that expand_path returns None for None input."""
+        assert expand_path(None) is None
+
+    def test_expand_path_tilde_linux(self) -> None:
+        """Test that ~/dotsync-repo expands to an absolute path under home."""
+        result = expand_path("~/dotsync-repo")
+        assert result is not None
+        assert result.is_absolute()
+        assert str(result).startswith(str(Path.home()))
+        assert result.name == "dotsync-repo"
+
+    def test_expand_path_no_resolve(self) -> None:
+        """Test that resolve=False expands ~ but does not resolve."""
+        result = expand_path("~/some/relative/../path", resolve=False)
+        assert result is not None
+        assert result.is_absolute()
+        # With resolve=False, '..' is preserved in the path
+        assert ".." in str(result)
+
+    def test_expand_path_already_absolute(self) -> None:
+        """Test that already-absolute paths are returned as-is (after resolve)."""
+        result = expand_path("/usr/local/bin")
+        assert result is not None
+        assert result == Path("/usr/local/bin")
+
+
+class TestConfigPathExpansion:
+    """Tests for Pydantic field validators that expand paths in DotSyncConfig."""
+
+    def test_config_expands_repo_path(self) -> None:
+        """Test that repo_path with ~ is expanded to an absolute Path."""
+        cfg = DotSyncConfig(repo_path="~/dotsync-repo")  # type: ignore[arg-type]
+        assert cfg.repo_path.is_absolute()
+        assert str(cfg.repo_path).startswith(str(Path.home()))
+        assert cfg.repo_path.name == "dotsync-repo"
+
+    def test_config_expands_gitcrypt_key_path(self) -> None:
+        """Test that gitcrypt_key_path with ~ is expanded to an absolute Path."""
+        cfg = DotSyncConfig(
+            repo_path="/tmp/repo",
+            gitcrypt_key_path="~/keys/dotsync.key",  # type: ignore[arg-type]
+        )
+        assert cfg.gitcrypt_key_path is not None
+        assert cfg.gitcrypt_key_path.is_absolute()
+        assert str(cfg.gitcrypt_key_path).startswith(str(Path.home()))
+        assert cfg.gitcrypt_key_path.name == "dotsync.key"
+
+    def test_config_expands_include_extra(self) -> None:
+        """Test that include_extra paths with ~ are expanded to absolute Paths."""
+        cfg = DotSyncConfig(
+            repo_path="/tmp/repo",
+            include_extra=["~/.config/custom"],  # type: ignore[arg-type]
+        )
+        assert len(cfg.include_extra) == 1
+        assert cfg.include_extra[0].is_absolute()
+        assert str(cfg.include_extra[0]).startswith(str(Path.home()))
+
+    def test_config_expands_exclude_patterns(self) -> None:
+        """Test that exclude_patterns expand ~ but do not resolve."""
+        cfg = DotSyncConfig(
+            repo_path="/tmp/repo",
+            exclude_patterns=["~/.config/*/cache"],
+        )
+        assert len(cfg.exclude_patterns) == 1
+        # ~ should be expanded to home dir
+        assert not cfg.exclude_patterns[0].startswith("~")
+        assert str(Path.home()) in cfg.exclude_patterns[0]
+        # Pattern glob chars should be preserved
+        assert "*/cache" in cfg.exclude_patterns[0]
+
+    def test_config_health_checks_not_expanded(self) -> None:
+        """Test that health_checks strings are left as-is (no path expansion)."""
+        cfg = DotSyncConfig(
+            repo_path="/tmp/repo",
+            health_checks=["ls ~/bin", "echo $HOME"],
+        )
+        assert cfg.health_checks == ["ls ~/bin", "echo $HOME"]
+
+    def test_config_expands_env_var(self) -> None:
+        """Test that environment variables in paths are expanded."""
+        with patch.dict("os.environ", {"MY_REPO": "/tmp/my-repo"}):
+            cfg = DotSyncConfig(repo_path="$MY_REPO")  # type: ignore[arg-type]
+            assert cfg.repo_path == Path("/tmp/my-repo")
