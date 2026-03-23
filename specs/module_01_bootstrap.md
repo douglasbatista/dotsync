@@ -104,7 +104,7 @@ File: `src/dotsync/logging_setup.py`
   - `RichHandler` (Rich) for console — INFO and above by default
   - `FileHandler` writing to `~/.dotsync/dotsync.log` — DEBUG and above always
 - `setup_logging(verbose: bool = False)` — called once at CLI startup; sets console to DEBUG if verbose
-- All modules use `logger = logging.getLogger(__name__)`
+- All modules use `logger = logging.getLogger("dotsync")` — single logger name for unified output
 
 **Test:**
 - `test_log_file_created` — after `setup_logging()`, log file exists at expected path

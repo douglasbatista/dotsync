@@ -111,8 +111,10 @@ For each candidate path:
 
 1. If it matches a user `exclude_patterns` glob -> `include=False, reason="user_excluded"`
 2. If it matches `include_extra` -> `include=True, reason="user_included"`
-3. If it matches a `HEURISTIC_RULES` entry (first match wins) -> `include=True, reason=<rule reason>`
+3. If it matches a `HEURISTIC_RULES` entry (first match wins) -> `include=None, reason=<rule reason>` (tags reason but defers verdict to AI)
 4. Otherwise -> `include=None, reason="ambiguous"`
+
+Heuristics no longer auto-include files. They tag the matching reason but leave `include=None` so the AI triage agent has final say. When no AI endpoint is configured, `discover()` falls back to `include=True` for heuristic-matched files.
 
 `os_profile` detection:
 
@@ -124,9 +126,9 @@ For each candidate path:
 
 | Test | Assertion |
 |---|---|
-| `test_home_dotfile_included` | `.gitconfig` -> `include=True, reason="home dotfile"` |
-| `test_xdg_config_included` | `.config/nvim/init.lua` -> `include=True, reason="XDG config"` |
-| `test_windows_appdata_json_included` | `AppData/.../settings.json` depth 4 -> match |
+| `test_home_dotfile_tagged` | `.gitconfig` -> `include=None, reason="home dotfile"` |
+| `test_xdg_config_tagged` | `.config/nvim/init.lua` -> `include=None, reason="XDG config"` |
+| `test_windows_appdata_json_tagged` | `AppData/.../settings.json` depth 4 -> `include=None, reason="Windows app config"` |
 | `test_windows_appdata_too_deep_excluded` | Depth 5 -> `include=None` |
 | `test_user_exclude_overrides_heuristic` | Pattern match -> `include=False` |
 | `test_ambiguous_file_pending` | `.log` file -> `include=None, reason="ambiguous"` |
@@ -137,20 +139,23 @@ For each candidate path:
 
 ## Step 2.4 — AI triage agent
 
-### `classify_with_ai(candidates, cfg) -> list[ConfigFile]`
+### `classify_with_ai(candidates, cfg, progress=None) -> list[ConfigFile]`
 
-Only called for files where `include is None`.
+Called for all files where `include is None` (both heuristic-matched and truly ambiguous).
 
 1. Load classification cache from `~/.dotsync/classification_cache.json`
 2. For cached entries, apply cached verdict
 3. For uncached entries, build payload with `path`, `size_bytes`, `first_lines` (joined string), `modified_days_ago`
-4. Call `chat_completion()` from `llm_client` with system prompt requesting `path`, `verdict`, and `reason` fields
-5. Parse JSON array response, map verdicts:
+4. Process in batches of `MAX_CANDIDATES_PER_BATCH` (10)
+5. Call `chat_completion()` from `llm_client` with system prompt requesting `path`, `verdict`, and `reason` fields
+6. Parse JSON array response, map verdicts:
    - `"include"` -> `include=True, reason="ai:include"`
    - `"exclude"` -> `include=False, reason="ai:exclude"`
    - anything else -> `include=None, reason="ask_user"`
-6. Save results to cache
-7. On `LLMError` or parse failure, fall back to `reason="ask_user"`
+7. Save results to cache
+8. On `LLMError`, mark only the current batch as `reason="ai:unreachable"` and continue to next batch (do not abandon remaining batches)
+9. On parse failure (`JSONDecodeError`), mark batch as `reason="ask_user"` and continue
+10. All batch details (paths, timing, verdicts, errors) logged at DEBUG level via `logging.getLogger("dotsync")`
 
 ### Tests
 
@@ -160,6 +165,8 @@ Only called for files where `include is None`.
 | `test_ai_classify_fallback_on_error` | `LLMError` -> `reason="ask_user"` |
 | `test_ai_classify_uses_cache` | Cached entry skips API call |
 | `test_ai_classify_saves_to_cache` | New verdict persisted to cache |
+| `test_classify_with_ai_chunks_large_input` | 45 candidates -> 5 batches of 10 |
+| `test_classify_with_ai_continues_after_batch_failure` | Failed batch 2 doesn't prevent batch 3 from running |
 
 ---
 
@@ -171,49 +178,59 @@ Only called for files where `include is None`.
 
 Raised on HTTP error, timeout, or malformed response.
 
-### `chat_completion(endpoint, model, system_prompt, user_message, timeout=15) -> str`
+### `chat_completion(endpoint, model, system_prompt, user_message, timeout=90, max_retries=2) -> str`
 
 Send a chat-completion request to `{endpoint}/v1/chat/completions` and return the assistant content string.
 
-- `timeout` is a positional parameter (type `int`, default `15`)
+- `timeout` is a positional parameter (type `int`, default `90`)
+- `max_retries` controls retry attempts on transient errors (default `2`)
 - Uses `httpx.post` with `temperature=0`
-- Raises `LLMError` on:
-  - HTTP status errors
-  - Timeout
-  - Missing `choices[0].message.content` in response
+- Retries with exponential backoff (`2 ** attempt` seconds: 2s, 4s) on:
+  - HTTP status errors (`httpx.HTTPStatusError`)
+  - Timeout (`httpx.TimeoutException`)
+  - Other HTTP errors (`httpx.HTTPError`)
+- Does NOT retry on malformed response (`KeyError`/`IndexError`/`TypeError`) — raises `LLMError` immediately
+- After exhausting retries, raises the last `LLMError`
 
 ### Tests (`tests/test_llm_client.py`)
 
 | Test | Assertion |
 |---|---|
 | `test_chat_completion_returns_content_string` | Successful response returns content |
-| `test_chat_completion_raises_llm_error_on_http_error` | HTTP 500 -> `LLMError` |
-| `test_chat_completion_raises_llm_error_on_timeout` | Timeout -> `LLMError` |
+| `test_chat_completion_raises_llm_error_on_http_error` | HTTP 500 -> `LLMError` (with `max_retries=0`) |
+| `test_chat_completion_raises_llm_error_on_timeout` | Timeout -> `LLMError` (with `max_retries=0`) |
 | `test_chat_completion_accepts_positional_timeout` | Timeout as 5th positional arg works |
-| `test_chat_completion_raises_llm_error_on_missing_choices` | Malformed body -> `LLMError` |
+| `test_chat_completion_raises_llm_error_on_missing_choices` | Malformed body -> `LLMError` immediately (no retry) |
+| `test_retries_on_timeout_then_succeeds` | 2 timeouts + success -> 3 calls, correct result |
+| `test_retries_on_http_error_then_succeeds` | HTTP 503 + success -> 2 calls, correct result |
+| `test_exhausts_retries_then_raises` | Always timeout -> `LLMError` after 3 calls |
+| `test_no_retry_on_malformed_response` | Malformed -> `LLMError` after 1 call, no sleep |
+| `test_backoff_timing` | Sleep called with 2 then 4 |
 
 ---
 
 ## Step 2.6 — Discovery orchestrator
 
-### `discover(cfg) -> list[ConfigFile]`
+### `discover(cfg, progress=None) -> list[ConfigFile]`
 
-1. `scan_candidates(extra_paths=cfg.include_extra)`
-2. `classify_heuristic(candidates, cfg)`
-3. Filter ambiguous (`include is None`)
-4. If `cfg.llm_endpoint` set, call `classify_with_ai(ambiguous, cfg)`
-5. Any remaining `include is None` -> `reason="ask_user"`
-6. Return full list
+1. `scan_candidates(extra_paths=cfg.include_extra, repo_path=cfg.repo_path)`
+2. `classify_heuristic(candidates, cfg)` — tags reason but leaves `include=None`
+3. Filter unresolved (`include is None`) — includes both heuristic-matched and truly ambiguous
+4. If `cfg.llm_endpoint` set, call `classify_with_ai(unresolved, cfg)`
+5. Any remaining `include is None` with a heuristic reason -> `include=True` (fallback when AI unavailable or batch failed)
+6. Any remaining `include is None` without heuristic reason -> `reason="ask_user"`
+7. Return full list
 
 ### Tests
 
 | Test | Assertion |
 |---|---|
-| `test_discover_returns_config_file_list` | Returns `list[ConfigFile]` |
+| `test_discover_returns_config_file_list` | Returns `list[ConfigFile]`, `.bashrc` included via fallback |
 | `test_discover_skips_ai_when_no_endpoint` | No endpoint -> AI not called |
 | `test_discover_never_returns_reason_unknown` | No `reason="unknown"` or `"ambiguous"` in output |
 | `test_discover_excludes_ssh_private_keys_end_to_end` | SSH keys never in output |
-| `test_discover_ai_only_receives_unknowns` | Only `include=None` files sent to AI |
+| `test_discover_ai_receives_all_unresolved` | Both heuristic-matched and ambiguous files sent to AI |
+| `test_discover_heuristic_fallback_without_ai` | No AI -> heuristic-matched files fall back to `include=True` |
 
 ---
 
@@ -221,6 +238,8 @@ Send a chat-completion request to `{endpoint}/v1/chat/completions` and return th
 
 - [ ] `discover()` returns `list[ConfigFile]` — no `None` verdicts remain
 - [ ] SSH private keys (`.ssh/id_*`) never appear in output
-- [ ] AI triage is only invoked for ambiguous files
+- [ ] AI triage receives all unresolved files (heuristic-matched and ambiguous)
+- [ ] Failed AI batch does not prevent remaining batches from processing
+- [ ] Heuristic-matched files fall back to `include=True` when AI is unavailable
 - [ ] Classification cache persists across runs
 - [ ] All tests pass: `uv run pytest tests/test_discovery.py tests/test_llm_client.py -v`

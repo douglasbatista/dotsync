@@ -19,16 +19,16 @@
   - [x] `scan_candidates(repo_path=...)` with `os.scandir()` + `_scan_dir()` recursive scanner, parallel root scanning via `ThreadPoolExecutor`, per-root max depth, two-phase filtering: subtree pruning (`PRUNE_DIRS` + `_PRUNE_PREFIXES` + `repo_path` + generated dir names) and `_prefilter_file()` with whitelist gate (safety excludes, size >50 KB, `ALLOWED_EXTENSIONS` / `ALLOWED_NAMED_FILES` / extensionless home dotfiles, `HOME_BLOCKED_DOTFILES`, 512-byte binary detection)
   - [x] `HOME_SCAN_DEPTH = 1` — `$HOME` scanned shallowly (direct children only), 21 `KNOWN_CONFIG_SUBDIRS` get deep scan (XDG, shell, editors, dev tools)
   - [x] `config_dirs()` returns `list[tuple[Path, int]]` with per-root max depth, existence-checked subdirs, `XDG_CONFIG_HOME` support
-  - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension)
-  - [x] `classify_with_ai()` with LiteLLM proxy, persistent cache, and batch chunking (max 20 per call)
+  - [x] `classify_heuristic()` with structural heuristic rules (home dotfile, XDG, AppData, config extension) — tags reason but leaves `include=None` for AI to decide
+  - [x] `classify_with_ai()` with LiteLLM proxy, persistent cache, batch chunking (max 10 per call), retry with exponential backoff (2s, 4s), continue-on-failure (failed batch doesn't kill remaining)
   - [x] `build_candidate_entry()` helper with 200-char truncation on first_lines
-  - [x] `discover()` orchestrator
+  - [x] `discover()` orchestrator — heuristic-matched files fall back to `include=True` when no AI endpoint
   - [x] `ScanEvent` TypedDict and `ProgressCallback` for real-time progress reporting
   - [x] Progress events: `root_start`/`root_done`, `dir_enter`/`dir_pruned`, `file_accepted`/`file_rejected`, `phase_start`/`phase_done`, `ai_batch`
-  - [x] `BLOCKED_FILENAME_PATTERNS` with regex detection for UUID (incl. dot-prefix), hex (incl. @version), numeric, hex-with-dots, trailing timestamp filenames
+  - [x] `BLOCKED_FILENAME_PATTERNS` with regex detection for UUID (incl. dot-prefix), hex 8+ (incl. @version), numeric, hex-with-dots, trailing timestamp, embedded hex 32+ filenames
   - [x] `_is_generated_filename()` used in `_should_prune_dir()` for directory-level pruning only (removed from file-level filtering)
   - [x] `_should_prune_dir()` prunes directories with generated names (UUID, hex, numeric) via `_is_generated_filename()`
-  - [x] AI system prompt uses environment-vs-infrastructure framing (not authorship)
+  - [x] AI system prompt uses environment-vs-infrastructure framing with detailed EXCLUDE rules (feature flags, addon defaults, IDE internals, OEM bloatware, VPN dumps, build scaffolding, project history)
   - [x] Whitelist-based file pre-filtering (replaces blacklist approach):
     - [x] `ALLOWED_EXTENSIONS`: 14 config extensions (`.toml`, `.yaml`, `.yml`, `.json`, `.jsonc`, `.ini`, `.cfg`, `.conf`, `.config`, `.xml`, `.properties`, `.env`, `.rc`, `.plist`)
     - [x] `ALLOWED_NAMED_FILES`: extensionless names (`config`, `credentials`)
@@ -36,7 +36,7 @@
     - [x] Home-root dotfiles accepted if extensionless or allowed extension
   - [x] `PRUNE_DIRS` expanded with `registry`, `bin`, `extensions`, `file-history`, `backups`, `todos`, `plugins`, `themes`, `custom`, `l10n`/`locales`/`locale`, `licenses`, `projects`, `tasks`, `conversations`, `events`, `subagents`, `language`, `gitstatus`, `.github`, `.gitlab`
   - [x] `_should_prune_dir()` excludes `repo_path` by resolved path comparison (dynamic, name-independent)
-  - [x] 94 tests + 2 perf tests with full acceptance criteria coverage
+  - [x] 103 tests + 2 perf tests with full acceptance criteria coverage
 - [x] Sensitive data flagging (`flagging.py`)
   - [x] 11 compiled regex patterns for secret detection
   - [x] `NEVER_INCLUDE` defense-in-depth blocklist
@@ -87,7 +87,7 @@
 
 - [x] CLI interface (`main.py`)
   - [x] `init` command with `--repo-path`, `--remote`, `--llm-endpoint`
-  - [x] `discover` command with `--no-ai` and interactive resolution
+  - [x] `discover` command with `--no-ai` and interactive resolution; AI debug details via `--verbose`
   - [x] `sync` command with full pipeline orchestration
   - [x] `restore` command with pull + restore or direct snapshot rollback
   - [x] `rollback` command with interactive selection and integrity verification
@@ -107,6 +107,8 @@
   - [x] Live progress wired into `discover` and `sync` commands via `_run_discover_with_progress()`
   - [x] `--verbose` surfaces `dir_pruned`/`file_rejected` events at DEBUG level
   - [x] `--verbose` logs full list of accepted files after scan phase ends
+  - [x] `--verbose` logs AI batch details (paths, timing, verdicts, errors) at DEBUG level
+  - [x] All debug output unified through Python `logging` → `~/.dotsync/dotsync.log` (always) + console (with `--verbose`)
   - [x] 11 tests covering CLI (up from 7)
 
 - [x] Integration tests (`test_integration.py`)
@@ -138,7 +140,7 @@
 
 - [x] Test infrastructure
   - [x] `pytest.mark.integration` and `pytest.mark.e2e` markers in `pyproject.toml`
-  - [x] 272 tests total (249 unit + 15 integration + 6 e2e + 2 perf deselected)
+  - [x] 285+ tests total (unit + 15 integration + 6 e2e + 2 perf deselected)
 
 - [x] README.md with user-facing documentation
   - [x] Features, quick start, command reference, configuration, security, AI triage, development, and project structure sections

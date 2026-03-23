@@ -37,11 +37,11 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 - `HEURISTIC_RULES`: structural rules evaluated in order (home dotfile, XDG config, Windows AppData, config extension) with depth limits
 - `ScanEvent` TypedDict and `ProgressCallback` type alias for real-time scan progress reporting
 - `scan_candidates(repo_path=...)`: uses `os.scandir()` with manual recursion via `_scan_dir()` for efficient scanning with `DirEntry` stat reuse. Scan roots walked in parallel via `ThreadPoolExecutor`. Two-phase filtering — Phase 1 prunes directory subtrees by name (`PRUNE_DIRS`), prefix (`_PRUNE_PREFIXES`), safety excludes, generated dir names, or resolved `repo_path` match. Phase 2 pre-filters files via `_prefilter_file()`: safety excludes, size >50 KB, whitelist gate (`ALLOWED_EXTENSIONS` / `ALLOWED_NAMED_FILES` / extensionless home dotfiles), binary detection (512-byte check, runs last). Home-root dotfiles get special handling: accepted if extensionless or allowed extension, rejected if in `HOME_BLOCKED_DOTFILES`. Extra paths bypass pruning and whitelist but not safety excludes. `PermissionError` on inaccessible dirs silently skipped. Accepts optional `progress` callback for live UI updates.
-- `classify_heuristic()`: matches against heuristic rules (first match wins), user exclude/include patterns, and assigns `os_profile` (linux/windows/shared)
+- `classify_heuristic()`: matches against heuristic rules (first match wins), user exclude/include patterns, and assigns `os_profile` (linux/windows/shared). Tags matching reason but leaves `include=None` — AI gets final say on all files. User exclude/include patterns are still deterministic.
 - `build_candidate_entry()`: constructs per-file payload dict (path, size, first_lines with 200-char cap, modified_days_ago) for LLM requests
-- `_should_prune_dir()`: checks `PRUNE_DIRS` (name match), `_PRUNE_PREFIXES` (prefix match), safety excludes, `repo_path` (resolved path comparison), and generated directory names (UUID, hex, numeric) via `_is_generated_filename()`. Generated filename detection is directory-level only — not applied to individual files.
-- `classify_with_ai()`: sends ambiguous files to LiteLLM proxy in batches of 20 (`MAX_CANDIDATES_PER_BATCH`), caches results in `~/.dotsync/classification_cache.json`, falls back to `ask_user` on error per batch
-- `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → mark remaining ambiguous as `ask_user`. Accepts optional `progress` callback; emits `phase_start`/`phase_done` events for each pipeline stage.
+- `_should_prune_dir()`: checks `PRUNE_DIRS` (name match), `_PRUNE_PREFIXES` (prefix match), safety excludes, `repo_path` (resolved path comparison), and generated directory names (UUID, hex 8+, numeric) via `_is_generated_filename()`. Generated filename detection is directory-level only — not applied to individual files.
+- `classify_with_ai()`: sends unresolved files to LiteLLM proxy in batches of 10 (`MAX_CANDIDATES_PER_BATCH`), caches results in `~/.dotsync/classification_cache.json`. Failed batches are marked `ai:unreachable` individually — remaining batches continue processing. All batch details (paths, timing, verdicts, errors) logged at DEBUG level.
+- `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → heuristic-matched files with no AI verdict fall back to `include=True` → remaining ambiguous marked `ask_user`. Accepts optional `progress` callback; emits `phase_start`/`phase_done` events for each pipeline stage.
 
 ### 4. Flagging (`flagging.py`)
 
@@ -142,7 +142,10 @@ Rich terminal output helpers for consistent formatting across all commands.
 
 - LiteLLM proxy endpoint for AI-powered file triage
 - Configurable via `llm_endpoint` and `llm_model` settings
-- Uses plain httpx for API calls
+- Uses plain httpx for API calls with retry logic (2 retries, exponential backoff 2s/4s, 90s timeout)
+- Batches of 10 files per request; failed batches don't block remaining batches
 - System prompt uses **environment vs infrastructure** framing: "Is this file part of the user's computing environment, or internal infrastructure the tool recreates on reinstall?"
-- INCLUDE trigger: file reflects a user choice (plugins, themes, registry mirrors) or would change behavior if lost
-- EXCLUDE trigger: tool would regenerate identical content on reinstall; project repo metadata; generated/machine-written content
+- INCLUDE trigger: file reflects a user choice (plugins, themes, registry mirrors) or would change behavior if lost — but settings.json/config.json require content inspection (may be app state)
+- EXCLUDE trigger: tool would regenerate identical content on reinstall; project repo metadata; generated/machine-written content; server-pushed feature flags; addon-shipped default settings; IDE internal storage; OEM bloatware; VPN auto-generated settings; build scaffolding; project/file history
+- Heuristic classifier pre-tags files but defers final verdict to AI; falls back to heuristic include when AI is unavailable
+- All AI batch details (timing, verdicts, errors) logged at DEBUG level via `--verbose` / `dotsync.log`

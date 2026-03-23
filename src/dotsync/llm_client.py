@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 
@@ -14,9 +16,13 @@ def chat_completion(
     model: str,
     system_prompt: str,
     user_message: str,
-    timeout: int = 15,
+    timeout: int = 90,
+    max_retries: int = 2,
 ) -> str:
     """Send a chat-completion request and return the assistant content.
+
+    Retries on transient errors (timeout, HTTP errors) with exponential
+    backoff. Malformed responses are not retried.
 
     Args:
         endpoint: Base URL of the OpenAI-compatible API (e.g. ``http://localhost:8000``).
@@ -24,6 +30,7 @@ def chat_completion(
         system_prompt: System message content.
         user_message: User message content.
         timeout: HTTP request timeout in seconds.
+        max_retries: Number of retries on transient errors (timeout, HTTP).
 
     Returns:
         The assistant's reply text.
@@ -40,20 +47,29 @@ def chat_completion(
         "temperature": 0,
     }
 
-    try:
-        resp = httpx.post(
-            f"{endpoint}/v1/chat/completions",
-            json=payload,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        return body["choices"][0]["message"]["content"]
-    except httpx.HTTPStatusError as exc:
-        raise LLMError(f"HTTP {exc.response.status_code}") from exc
-    except httpx.TimeoutException as exc:
-        raise LLMError("Request timed out") from exc
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"Malformed response: {exc}") from exc
-    except httpx.HTTPError as exc:
-        raise LLMError(str(exc)) from exc
+    last_exc: LLMError | None = None
+    for attempt in range(1 + max_retries):
+        if attempt > 0:
+            time.sleep(2 ** attempt)
+        try:
+            resp = httpx.post(
+                f"{endpoint}/v1/chat/completions",
+                json=payload,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            return body["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as exc:
+            last_exc = LLMError(f"HTTP {exc.response.status_code}")
+            last_exc.__cause__ = exc
+        except httpx.TimeoutException as exc:
+            last_exc = LLMError("Request timed out")
+            last_exc.__cause__ = exc
+        except (KeyError, IndexError, TypeError) as exc:
+            # Malformed response — not retryable
+            raise LLMError(f"Malformed response: {exc}") from exc
+        except httpx.HTTPError as exc:
+            last_exc = LLMError(str(exc))
+            last_exc.__cause__ = exc
+    raise last_exc  # type: ignore[misc]

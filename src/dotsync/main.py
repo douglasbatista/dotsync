@@ -131,6 +131,7 @@ def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
 
     stats = ScanStats(start_time=time.monotonic())
     accepted_paths: list[str] = []
+    ai_errors: list[str] = []
 
     def on_event(event: ScanEvent) -> None:
         t = event["type"]
@@ -152,6 +153,8 @@ def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
                 logger.debug("accepted: %s", p)
         elif t == "ai_batch":
             stats.ai_batches_done += 1
+        elif t == "ai_error":
+            ai_errors.append(event["reason"] or "unknown error")
         # Log pruned/rejected at DEBUG for --verbose visibility
         if t in ("dir_pruned", "file_rejected"):
             logger.debug("%s: %s (%s)", t, event["path"], event["reason"])
@@ -159,6 +162,14 @@ def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
 
     with Live(make_scan_display(stats), console=console, refresh_per_second=8) as live:
         files = run_discover(cfg, progress=on_event)
+
+    if ai_errors:
+        from dotsync.ui import print_warning
+        print_warning(
+            f"AI classification failed: {ai_errors[0]}. "
+            "Ambiguous files will require manual review. "
+            "Check that the LLM endpoint is running and reachable."
+        )
 
     return files
 

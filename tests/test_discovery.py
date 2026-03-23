@@ -985,7 +985,8 @@ class TestProgressCallback:
 
 
 class TestClassifyHeuristic:
-    def test_home_dotfile_included(self, tmp_path: Path) -> None:
+    def test_home_dotfile_tagged(self, tmp_path: Path) -> None:
+        """Heuristic tags reason but leaves include=None for AI."""
         f = _make_file(tmp_path, ".gitconfig", "# git config")
         cfg = _default_cfg()
 
@@ -993,10 +994,11 @@ class TestClassifyHeuristic:
             result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
-        assert result[0].include is True
+        assert result[0].include is None
         assert result[0].reason == "home dotfile"
 
-    def test_xdg_config_included(self, tmp_path: Path) -> None:
+    def test_xdg_config_tagged(self, tmp_path: Path) -> None:
+        """Heuristic tags reason but leaves include=None for AI."""
         f = _make_file(tmp_path, ".config/nvim/init.lua", "-- nvim config")
         cfg = _default_cfg()
 
@@ -1004,10 +1006,11 @@ class TestClassifyHeuristic:
             result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
-        assert result[0].include is True
+        assert result[0].include is None
         assert result[0].reason == "XDG config"
 
-    def test_windows_appdata_json_included(self, tmp_path: Path) -> None:
+    def test_windows_appdata_json_tagged(self, tmp_path: Path) -> None:
+        """Heuristic tags reason but leaves include=None for AI."""
         f = _make_file(
             tmp_path,
             "AppData/Roaming/Code/User/settings.json",
@@ -1019,7 +1022,7 @@ class TestClassifyHeuristic:
             result = classify_heuristic([f], cfg)
 
         assert len(result) == 1
-        assert result[0].include is True
+        assert result[0].include is None
         assert result[0].reason == "Windows app config"
 
     def test_windows_appdata_too_deep_excluded(self, tmp_path: Path) -> None:
@@ -1124,7 +1127,7 @@ class TestClassifyWithAI:
             result = classify_with_ai([cf], cfg)
 
         assert result[0].include is None
-        assert result[0].reason == "ask_user"
+        assert result[0].reason == "ai:unreachable"
 
     def test_ai_classify_uses_cache(self, tmp_path: Path) -> None:
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
@@ -1176,7 +1179,7 @@ class TestClassifyWithAI:
         assert entry["first_lines"].endswith("...")
 
     def test_classify_with_ai_chunks_large_input(self, tmp_path: Path) -> None:
-        """45 candidates should result in exactly 3 chat_completion calls (20+20+5)."""
+        """45 candidates should result in exactly 5 chat_completion calls (10*4+5)."""
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
         candidates: list[ConfigFile] = []
         for i in range(45):
@@ -1206,7 +1209,7 @@ class TestClassifyWithAI:
             patch("dotsync.discovery._save_classification_cache"),
         ):
             classify_with_ai(candidates, cfg)
-            assert mock_chat.call_count == 3
+            assert mock_chat.call_count == 5
 
     def test_ai_classify_saves_to_cache(self, tmp_path: Path) -> None:
         cfg = _default_cfg(llm_endpoint="http://localhost:8000")
@@ -1229,6 +1232,57 @@ class TestClassifyWithAI:
         assert "newfile.conf" in saved_cache
         assert saved_cache["newfile.conf"]["include"] is False
         assert saved_cache["newfile.conf"]["reason"] == "ai:exclude"
+
+    def test_classify_with_ai_continues_after_batch_failure(self, tmp_path: Path) -> None:
+        """A failing batch should not prevent subsequent batches from running."""
+        cfg = _default_cfg(llm_endpoint="http://localhost:8000")
+        candidates: list[ConfigFile] = []
+        for i in range(25):
+            rel = f"file_{i}.conf"
+            f = _make_file(tmp_path, rel, f"content {i}")
+            candidates.append(
+                ConfigFile(
+                    path=Path(rel),
+                    abs_path=f,
+                    size_bytes=10,
+                    include=None,
+                    reason="ambiguous",
+                )
+            )
+
+        call_count = 0
+
+        def fake_response(**kwargs: object) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise LLMError("Request timed out")
+            items = json.loads(str(kwargs.get("user_message", "[]")))
+            return json.dumps(
+                [{"path": item["path"], "verdict": "include"} for item in items]
+            )
+
+        with (
+            patch("dotsync.discovery.chat_completion", side_effect=fake_response),
+            patch("dotsync.discovery._load_classification_cache", return_value={}),
+            patch("dotsync.discovery._save_classification_cache"),
+        ):
+            classify_with_ai(candidates, cfg)
+
+        # Batch 1 (files 0-9): classified by AI
+        for cf in candidates[:10]:
+            assert cf.include is True
+            assert cf.reason == "ai:include"
+
+        # Batch 2 (files 10-19): failed, marked unreachable
+        for cf in candidates[10:20]:
+            assert cf.include is None
+            assert cf.reason == "ai:unreachable"
+
+        # Batch 3 (files 20-24): classified by AI (not abandoned)
+        for cf in candidates[20:]:
+            assert cf.include is True
+            assert cf.reason == "ai:include"
 
 
 # ---------------------------------------------------------------------------
@@ -1321,8 +1375,8 @@ class TestDiscover:
         assert ".ssh/id_rsa" not in paths
         assert ".ssh/id_ed25519" not in paths
 
-    def test_discover_ai_only_receives_unknowns(self, tmp_path: Path) -> None:
-        """When AI is called, it should only receive files with include=None."""
+    def test_discover_ai_receives_all_unresolved(self, tmp_path: Path) -> None:
+        """AI receives all files with include=None, including heuristic-matched ones."""
         _make_file(tmp_path, ".bashrc", "# known file")
         _make_file(tmp_path, "a/b/c/ambiguous.xml", "unknown file")
 
@@ -1335,8 +1389,8 @@ class TestDiscover:
         ) -> list[ConfigFile]:
             ai_received.extend(candidates)
             for cf in candidates:
-                cf.include = None
-                cf.reason = "ask_user"
+                cf.include = True
+                cf.reason = "ai:include"
             return candidates
 
         with (
@@ -1346,11 +1400,27 @@ class TestDiscover:
         ):
             discover(cfg)
 
-        # AI should only have received ambiguous files, not .bashrc
+        # Both heuristic-matched and ambiguous files should reach AI
         ai_paths = {str(cf.path) for cf in ai_received}
-        assert ".bashrc" not in ai_paths
-        # All files sent to AI should have had include=None before the call
-        assert len(ai_received) >= 1
+        assert ".bashrc" in ai_paths
+        assert len(ai_received) >= 2
+
+    def test_discover_heuristic_fallback_without_ai(self, tmp_path: Path) -> None:
+        """Without AI, heuristic-matched files fall back to include=True."""
+        _make_file(tmp_path, ".bashrc", "# bash")
+
+        cfg = _default_cfg()  # no llm_endpoint
+
+        with (
+            patch("dotsync.discovery.config_dirs", return_value=[(tmp_path, 5)]),
+            patch("dotsync.discovery.home_dir", return_value=tmp_path),
+        ):
+            result = discover(cfg)
+
+        bashrc = [cf for cf in result if cf.path == Path(".bashrc")]
+        assert len(bashrc) == 1
+        assert bashrc[0].include is True
+        assert bashrc[0].reason == "home dotfile"
 
 
 # ---------------------------------------------------------------------------

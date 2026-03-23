@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Callable, Literal, TypedDict
+
+logger = logging.getLogger("dotsync")
 
 from pydantic import BaseModel
 
@@ -36,6 +40,7 @@ class ScanEvent(TypedDict):
         "phase_start",
         "phase_done",
         "ai_batch",
+        "ai_error",
     ]
     path: str | None
     reason: str | None
@@ -105,16 +110,21 @@ PRUNE_DIRS: list[str] = [
     "dist", "build", "target", "out", ".next", ".nuxt",
     # Runtime / generated state
     ".cache", "Cache", "cache",
-    "logs", "log", "tmp", "temp",
+    "logs", "log", "tmp", "temp", "Temp",
     # Electron / Chromium caches
     "GPUCache", "ShaderCache", "DawnCache", "Code Cache",
-    "CachedData", "CachedExtensions", "blob_storage", "CacheStorage",
+    "CachedData", "CachedExtensions", "CachedConfigurations",
+    "blob_storage", "CacheStorage", "htmlcache",
     # IDE state
-    "caches", "snapshots", "index",
+    "caches", "snapshots", "index", "History",
     # VS Code server — binaries, bundled extensions, not user config
     "bin", "extensions",
     # App internal state directories
     "file-history", "backups", "todos",
+    # Installed program files (not user config)
+    "Programs",
+    # Internet Explorer DOM storage
+    "DOMStore",
     # Shell plugin code and themes (oh-my-zsh, zinit, etc.)
     "plugins", "themes", "custom",
     # Locale / i18n bundles
@@ -165,14 +175,18 @@ BLOCKED_FILENAME_PATTERNS: list[re.Pattern[str]] = [
         r"^\.?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         re.IGNORECASE,
     ),
-    # Pure hex 16+ chars, optionally followed by @version (git SHAs, cache keys)
-    re.compile(r"^[0-9a-f]{16,}(@[a-z0-9]+)?$", re.IGNORECASE),
+    # Pure hex 8+ chars, optionally followed by @version (short hashes, git SHAs, cache keys)
+    re.compile(r"^[0-9a-f]{8,}(@[a-z0-9]+)?$", re.IGNORECASE),
     # Pure numeric filenames (generated IDs, timestamps as filenames)
     re.compile(r"^\d+$"),
     # Hex with dots/dashes only — e.g. "a1b2c3d4.e5f6" (VS Code extension storage)
     re.compile(r"^[0-9a-f]{6,}[.\-][0-9a-f]{4,}$", re.IGNORECASE),
     # Trailing Unix timestamp (10+ digits) after a dot — e.g. .claude.json.backup.1772283029203
     re.compile(r"\.\d{10,}$"),
+    # Version-number directories/files — e.g. "4.10.2934.0", "120.0.6050.0"
+    re.compile(r"^\d+(\.\d+){2,}$"),
+    # Embedded hex 32+ chars (SHA-256, etc.) — e.g. "config.133e14b5...e4e1.omp"
+    re.compile(r"[0-9a-f]{32,}", re.IGNORECASE),
 ]
 
 
@@ -205,7 +219,7 @@ MAX_FILE_SIZE = 50_000
 BINARY_CHECK_BYTES = 512
 MAX_FIRST_LINES = 5
 MAX_FIRST_LINES_CHARS = 200
-MAX_CANDIDATES_PER_BATCH = 20
+MAX_CANDIDATES_PER_BATCH = 10
 
 CLASSIFICATION_CACHE_FILE = CONFIG_DIR / "classification_cache.json"
 
@@ -235,14 +249,56 @@ Classify each file as one of:
 EXCLUDE confidently if ANY of the following are true:
 - The file is a cache, index, lock, marker, or accounting file the tool writes to track its own state
 - The file is source code, a library, or a template that ships with the tool installation
+- The file is build/packaging scaffolding: package.json, tsconfig.json, Makefile, setup.py,
+  pyproject.toml, Cargo.toml, etc. inside a tool's config directory — these define the tool's own
+  build process, not user preferences. They are recreated when the tool is reinstalled
 - The file belongs to a project repository (CI config, funding declarations, contributor files)
 - The content is generated or machine-written with no user-specific values
 - Reinstalling the tool would produce this file with identical content
+- The path contains segments suggesting temporary or historical data (e.g. "tmp", "temp", "history",
+  "backup", "old", "archive", "trash", "undo", "recovery", "session", "swap")
+- The path or filename contains hex hashes (32+ hex chars), UUIDs, or purely numeric indexes — these
+  indicate auto-generated or cache-keyed storage, not user configuration. For example a filename like
+  "config.133e14b50b2ae0ab.omp.json" is a cached copy keyed by content hash, not a user config file
+- The file is a server-pushed feature flag, A/B test config, or remote-fetched policy file that the
+  app downloads on startup and would re-download on reinstall (e.g. NordVPN FeatureConfigs,
+  Docker unleash toggle files, app onboarding configs)
+- The file is an addon/plugin/extension manifest OR default settings (addon.xml, manifest.json,
+  resources/settings.xml) that ships with the addon installation — these are recreated when the
+  addon is reinstalled. Files under "addons/*/resources/" are addon defaults, not user overrides;
+  user-customized addon settings live in "userdata/addon_data/", not inside the addon directory
+- The file tracks internal app state: window positions, notification read-state, install timestamps,
+  update-check results, feedback history, periodic task schedules, version metadata, or project/file
+  history (recently opened projects, recent files, workspace lists) — these are machine-specific
+  and not portable
+- The file is IDE/editor internal storage (globalStorage/storage.json, argv.json, workspace state)
+  — these contain machine-specific telemetry IDs, window state, and paths, not user preferences.
+  User settings in editors live in files explicitly named "settings.json" or "keybindings.json"
+  under a User or profile directory
+- The file belongs to OEM/vendor bloatware (e.g. Lenovo Vantage, Dell SupportAssist) — these are
+  machine-specific manufacturer tools whose config is not portable across machines
+- The file is a VPN/security app's auto-generated settings dump with server lists, routing tables,
+  or connection profiles fetched from the provider — these are large, machine-specific, and
+  regenerated on login
+- The file is a server/cluster list, CDN endpoint map, or infrastructure topology that the app
+  fetches from its backend — the content is identical for all users
+- The file is desktop.ini (Windows auto-generated folder metadata) or similar OS-generated markers
+- The file contains login tokens, session cookies, or auth credentials (login-info, auth-token, etc.)
+  — these are machine-specific secrets, not portable config
+- The file is telemetry/reporting data, data-collection consent flags, or analytics state
+- The file is an installation receipt, installer state, or upgrade-pending marker
+- The file is a browser's built-in search engine list, partner speed dials, keyword index, or
+  assistant preferences — these ship with the browser and are not user customizations
 
 INCLUDE confidently if ANY of the following are true:
 - The file controls how a tool behaves for this user, even if never manually edited
 - The file reflects a choice — installed plugins, selected theme, registry mirror, auth context
 - Losing or changing this file would produce a different experience on a fresh machine
+- The file is named settings.json, config.yaml, *.conf, *.ini, or similar AND contains values the
+  user chose or customized (keybindings, theme selection, editor preferences, shell prompt config)
+- BUT: a file named "settings.json" or "config.json" is NOT automatically included — check the
+  content and path. If it contains machine IDs, telemetry state, window geometry, or is under an
+  internal storage directory, it is app state, not user config
 
 Use "ask_user" sparingly. Only when path and content together give no clear signal.
 Credentials and private keys are outside your scope — they are handled separately.
@@ -380,6 +436,10 @@ def _prefilter_file(
         pass  # accepted — e.g. .ssh/config, .aws/credentials
     else:
         return f"not in whitelist: {name}"
+
+    # Generated filename — hash, UUID, numeric, version-numbered
+    if _is_generated_filename(path):
+        return f"generated filename: {name}"
 
     # Binary — only check that touches file content
     if stat.st_size > 0 and _is_binary(path):
@@ -617,11 +677,10 @@ def classify_heuristic(
         elif any(rel_str == str(p) or str(fpath) == str(p) for p in include_extra):
             include = True
             reason = "user_included"
-        # Check heuristic rules (first match wins)
+        # Check heuristic rules — tag reason but leave include=None for AI
         else:
             for rule in HEURISTIC_RULES:
                 if _matches_heuristic(rel, rule):
-                    include = True
                     reason = rule["reason"]
                     break
 
@@ -766,14 +825,25 @@ def classify_with_ai(
             "count": len(batch),
         })
         items = [build_candidate_entry(cf) for cf in batch]
+        user_message = json.dumps(items)
+        batch_paths = [str(cf.path) for cf in batch]
 
+        logger.debug(
+            "ai batch %d/%d: %d files, prompt=%d chars, message=%d chars, paths=%s",
+            batch_idx + 1, total_batches, len(batch),
+            len(system_prompt), len(user_message), batch_paths,
+        )
+
+        t0 = time.monotonic()
         try:
             content = chat_completion(
                 endpoint=cfg.llm_endpoint,
                 model=cfg.llm_model,
                 system_prompt=system_prompt,
-                user_message=json.dumps(items),
+                user_message=user_message,
             )
+            elapsed = time.monotonic() - t0
+
             verdicts_raw = json.loads(content)
 
             verdict_map: dict[str, str] = {}
@@ -781,6 +851,11 @@ def classify_with_ai(
                 for v in verdicts_raw:
                     if isinstance(v, dict) and "path" in v and "verdict" in v:
                         verdict_map[v["path"]] = v["verdict"]
+
+            logger.debug(
+                "ai batch %d/%d: ok in %.1fs, response=%d chars, verdicts=%s",
+                batch_idx + 1, total_batches, elapsed, len(content), verdict_map,
+            )
 
             for cf in batch:
                 key = str(cf.path)
@@ -797,7 +872,28 @@ def classify_with_ai(
 
                 cache[key] = {"include": cf.include, "reason": cf.reason}
 
-        except (LLMError, json.JSONDecodeError, TypeError):
+        except LLMError as exc:
+            elapsed = time.monotonic() - t0
+            logger.debug(
+                "ai batch %d/%d: error after %.1fs: %s",
+                batch_idx + 1, total_batches, elapsed, exc,
+            )
+            _emit(progress, {
+                "type": "ai_error",
+                "path": None,
+                "reason": str(exc),
+                "count": None,
+            })
+            # Mark only this batch as unreachable; continue to next batch
+            for cf in batch:
+                cf.include = None
+                cf.reason = "ai:unreachable"
+        except (json.JSONDecodeError, TypeError) as exc:
+            elapsed = time.monotonic() - t0
+            logger.debug(
+                "ai batch %d/%d: parse error after %.1fs: %s, raw=%s",
+                batch_idx + 1, total_batches, elapsed, exc, content,
+            )
             for cf in batch:
                 cf.include = None
                 cf.reason = "ask_user"
@@ -844,9 +940,13 @@ def discover(
         classify_with_ai(ambiguous, cfg, progress=progress)
         _emit(progress, {"type": "phase_done", "reason": "ai_triage", "path": None, "count": len(ambiguous)})
 
-    # Any remaining None → ask_user
+    # Any remaining None: if heuristic-matched, fall back to include; otherwise ask_user
+    heuristic_reasons = {rule["reason"] for rule in HEURISTIC_RULES}
     for cf in classified:
         if cf.include is None:
-            cf.reason = "ask_user"
+            if cf.reason in heuristic_reasons:
+                cf.include = True
+            else:
+                cf.reason = "ask_user"
 
     return classified

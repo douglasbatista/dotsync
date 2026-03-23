@@ -239,5 +239,18 @@
   - Test suite rewritten: blacklist-specific tests replaced with whitelist accept/reject tests; 94 tests (+ 2 perf deselected)
   - Total test count: 270 (+ 2 perf deselected)
 
+### Changed (continued)
+- AI triage pipeline reliability improvements
+  - `chat_completion()` now retries on transient errors (timeout, HTTP) with exponential backoff (2s, 4s); `max_retries=2` default; malformed responses raise immediately without retry
+  - Default HTTP timeout increased from 15s to 90s
+  - `MAX_CANDIDATES_PER_BATCH` reduced from 20 to 10 for faster per-batch responses
+  - Failed AI batch no longer abandons all remaining batches — only the failed batch is marked `ai:unreachable`, processing continues to the next batch
+  - AI system prompt expanded with EXCLUDE rules for: server-pushed feature flags, addon default settings vs user overrides, IDE internal storage (globalStorage, argv.json), OEM/vendor bloatware, VPN auto-generated settings dumps, build/packaging scaffolding (package.json, tsconfig.json in tool dirs), project/file history; INCLUDE section adds caveat that settings.json requires content/path inspection
+  - `BLOCKED_FILENAME_PATTERNS` expanded: pure hex threshold lowered from 16 to 8 chars; new pattern for embedded hex 32+ chars (SHA-256 in filenames)
+  - Heuristic classifier no longer auto-includes files — tags reason but leaves `include=None` for AI to decide; falls back to `include=True` when no AI endpoint is configured
+  - Removed `--debug` flag and `ai_debug.jsonl` mechanism; AI triage details now logged via standard Python `logging` at DEBUG level, visible with `--verbose` on console and always written to `~/.dotsync/dotsync.log`
+  - 10 new tests for retry behaviour, continue-on-failure, heuristic fallback; test suite updated for new heuristic semantics
+  - Test count: 103 in `test_discovery.py` + 10 in `test_llm_client.py`
+
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest

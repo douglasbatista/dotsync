@@ -38,6 +38,8 @@ Integration layer wiring all DotSync modules into a complete CLI using Typer and
 | `file_table(files)` | Rich table of ConfigFile objects |
 | `snapshot_table(snapshots)` | Rich table of SnapshotMeta objects |
 | `flag_panel(flag_result)` | Rich panel for flagged sensitive file |
+| `ScanStats` | Dataclass with `start_time` for tracking scan progress |
+| `make_scan_display()` | Returns `Group` with animated spinner + stats table |
 
 ## Commands
 
@@ -49,9 +51,11 @@ Pipeline: check_dependencies → confirm overwrite → default_config → init_r
 
 ### `discover`
 
-Options: `--no-ai`
+Options: `--no-ai`, `--verbose`
 
 Pipeline: load_config → discover(cfg) → display file_table grouped by verdict → interactive prompt for pending files
+
+`--verbose` surfaces AI batch details (paths, timing, verdicts, errors), dir pruning, and file rejection events at DEBUG level on console. All debug output also written to `~/.dotsync/dotsync.log` regardless of `--verbose`.
 
 ### `sync`
 
@@ -93,11 +97,13 @@ Options: `--show`, `--set KEY=VALUE`
 
 ## Testing
 
-7 tests in `tests/test_cli.py`:
+11 tests in `tests/test_cli.py`:
 
 - **TestConfirmSensitiveFiles** (3): Include/Exclude/Skip flows
+- **TestMarkSensitive**: post-confirmation helper sets `ConfigFile.sensitive=True` for files with detections
 - **TestConfigCommand** (2): set valid key, reject unknown key
 - **TestErrorHandling** (2): health check failure exit code, missing dependency exit code
+- Additional CLI tests covering confirmation, config, and error handling
 
 ## Design Decisions
 
@@ -106,3 +112,4 @@ Options: `--show`, `--set KEY=VALUE`
 3. `typer.Exit(code=N)` for structured exit codes
 4. Rich status spinners for long operations
 5. `config --set` validates key names against Pydantic model fields
+6. All debug output unified through Python `logging` → `~/.dotsync/dotsync.log` (always) + console (with `--verbose`). No separate debug files.
