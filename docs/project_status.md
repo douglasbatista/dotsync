@@ -154,6 +154,6 @@
 ## Next Steps
 
 All core modules, CLI commands, and test suites are complete. Potential future work:
-- Cross-platform testing on Windows
+- ~~Cross-platform testing on Windows~~ (initial Windows fixes applied: health checks, git push)
 - CI pipeline setup
 - Package publishing

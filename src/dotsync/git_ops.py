@@ -326,7 +326,17 @@ def commit_and_push(repo: git.Repo, message: str) -> None:
             "No remote configured. Set a remote with set_remote() before pushing."
         )
 
-    repo.remotes.origin.push()
+    branch = repo.active_branch.name
+    push_infos = repo.remotes.origin.push(
+        refspec=f"{branch}:{branch}", set_upstream=True
+    )
+    for info in push_infos:
+        if info.flags & info.ERROR:
+            raise git.GitCommandError(
+                "git push",
+                128,
+                stderr=info.summary.strip() if info.summary else "push rejected",
+            )
 
 
 def pull(repo: git.Repo) -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import shlex
 import subprocess
 import time
@@ -57,9 +58,16 @@ class HealthCheckFailedError(Exception):
 # Default checks
 # ---------------------------------------------------------------------------
 
+def _default_shell_check() -> str:
+    """Return a platform-appropriate shell health check command."""
+    if platform.system() == "Windows":
+        return "cmd /c echo ok"
+    return "${SHELL} -c 'echo ok'"
+
+
 DEFAULT_CHECKS: list[HealthCheck] = [
     HealthCheck(name="git", command="git --version"),
-    HealthCheck(name="shell", command="${SHELL} -c 'echo ok'"),
+    HealthCheck(name="shell", command=_default_shell_check()),
 ]
 
 # ---------------------------------------------------------------------------

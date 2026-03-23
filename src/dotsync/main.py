@@ -464,6 +464,9 @@ def sync(
         if repo.is_dirty(index=True) or repo.untracked_files:
             repo.index.commit(message)
         print_warning("No remote configured — committed locally only")
+    except Exception as exc:
+        # Push failed (e.g. rejected, auth error) — commit is already local
+        print_warning(f"Changes committed locally but push failed: {exc}")
 
     # 7. Health checks
     print_section("Health Checks")

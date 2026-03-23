@@ -254,3 +254,7 @@
 
 ### Fixed
 - `register_new_files()` no longer hardcodes `sensitive_flagged=False` — sensitivity detection results are now persisted in the manifest
+- `commit_and_push()` now specifies branch refspec and `--set-upstream` when pushing — fixes `fatal: The current branch has no upstream branch` on first push
+- `commit_and_push()` now checks `PushInfo.ERROR` flags and raises `GitCommandError` on push failure — previously errors like "push declined due to email privacy restrictions" were silently swallowed
+- Push failures in `sync` command now show a warning instead of an unhandled traceback — commit is preserved locally
+- Shell health check now uses `cmd /c echo ok` on Windows instead of `${SHELL} -c 'echo ok'` — fixes false failure and unnecessary rollback on Windows
