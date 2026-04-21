@@ -552,7 +552,11 @@ def scan_candidates(
                 )] = root
             for future in as_completed(futures):
                 root = futures[future]
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception:
+                    logger.debug("scan failed for root %s", root, exc_info=True)
+                    result = []
                 all_candidates.extend(result)
                 _emit(progress, {
                     "type": "root_done",

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -41,23 +41,12 @@ def filter_by_profile(
     Returns:
         Filtered list of entries matching the current OS or shared.
     """
-    return [
-        e
-        for e in entries
-        if e.os_profile == current_os or e.os_profile == "shared"
-    ]
+    return [e for e in entries if e.os_profile in (current_os, "shared")]
 
 
 # ---------------------------------------------------------------------------
 # Step 5.2 — Path transformer
 # ---------------------------------------------------------------------------
-
-# Regex matching a source home path in value positions:
-#   - after = or :  (config assignments)
-#   - inside quotes
-# Negative lookbehind avoids mangling URLs (https://, http://)
-_VALUE_POSITION = r'(?:(?<=[=:])\s*|(?<=["\']))({home})'
-
 
 def transform_paths(
     content: str,
@@ -339,10 +328,9 @@ def execute_restore(
         act.destination.parent.mkdir(parents=True, exist_ok=True)
 
         if act.transformed and can_transform:
-            assert source_os is not None
-            assert target_os is not None
-            assert source_home is not None
-            assert target_home is not None
+            if source_os is None or target_os is None or source_home is None or target_home is None:
+                shutil.copy2(act.source, act.destination)
+                continue
             content = act.source.read_text(encoding="utf-8", errors="replace")
             transformed = transform_paths(
                 content, source_os, target_os, source_home, target_home
@@ -389,7 +377,7 @@ def register_new_files(
         if not fr.requires_confirmation:
             confirmed.add(fr.config_file.abs_path)
 
-    now = datetime.now().astimezone().isoformat()
+    now = datetime.now(tz=timezone.utc).isoformat()
     new_entries: list[ManifestEntry] = []
 
     for cf in new_files:
@@ -457,12 +445,8 @@ def detect_conflicts(
         if not local_path.exists() or not repo_file.exists():
             continue
 
-        local_mtime = datetime.fromtimestamp(
-            local_path.stat().st_mtime,
-        ).astimezone()
-        repo_mtime = datetime.fromtimestamp(
-            repo_file.stat().st_mtime,
-        ).astimezone()
+        local_mtime = datetime.fromtimestamp(local_path.stat().st_mtime, tz=timezone.utc)
+        repo_mtime = datetime.fromtimestamp(repo_file.stat().st_mtime, tz=timezone.utc)
 
         if local_mtime > last_sync and repo_mtime > last_sync:
             conflicts.append(

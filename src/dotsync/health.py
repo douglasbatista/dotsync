@@ -62,7 +62,8 @@ def _default_shell_check() -> str:
     """Return a platform-appropriate shell health check command."""
     if platform.system() == "Windows":
         return "cmd /c echo ok"
-    return "${SHELL} -c 'echo ok'"
+    shell = os.environ.get("SHELL", "/bin/sh")
+    return f"{shell} -c 'echo ok'"
 
 
 DEFAULT_CHECKS: list[HealthCheck] = [
@@ -150,7 +151,7 @@ def _user_checks_from_config(cfg: DotSyncConfig) -> list[HealthCheck]:
     """Convert user command strings to HealthCheck objects."""
     checks: list[HealthCheck] = []
     for cmd in cfg.health_checks:
-        name = cmd.split()[0] if cmd.strip() else cmd
+        name = Path(cmd.split()[0]).name if cmd.strip() else cmd
         checks.append(HealthCheck(name=name, command=cmd))
     return checks
 
@@ -231,14 +232,16 @@ def check_and_rollback_if_needed(
             stderr_snippet,
         )
 
-    snapshot.rollback(snapshot_id, home)
-    logger.warning("automatic rollback performed to snapshot %s", snapshot_id)
+    try:
+        snapshot.rollback(snapshot_id, home)
+        logger.warning("automatic rollback performed to snapshot %s", snapshot_id)
+        rollback_note = f"Automatic rollback to snapshot {snapshot_id} completed."
+    except Exception:
+        logger.error("rollback to snapshot %s failed", snapshot_id, exc_info=True)
+        rollback_note = f"Automatic rollback to snapshot {snapshot_id} FAILED — check logs."
 
     names = ", ".join(r.check.name for r in failed)
-    raise HealthCheckFailedError(
-        f"Health checks failed: {names}. "
-        f"Automatic rollback to snapshot {snapshot_id} completed."
-    )
+    raise HealthCheckFailedError(f"Health checks failed: {names}. {rollback_note}")
 
 
 # ---------------------------------------------------------------------------

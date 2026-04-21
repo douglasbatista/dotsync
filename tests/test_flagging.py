@@ -259,8 +259,8 @@ class TestNeverInclude:
         assert cf.reason == "never_include"
 
     def test_gitcrypt_key_always_excluded(self, tmp_path: Path) -> None:
-        """dotsync_key in NEVER_INCLUDE is set to include=False."""
-        cf = _config_file(tmp_path, "dotsync_key", "key data\n", include=True)
+        """dotsync.key in NEVER_INCLUDE is set to include=False."""
+        cf = _config_file(tmp_path, "dotsync.key", "key data\n", include=True)
         enforce_never_include([cf])
         assert cf.include is False
         assert cf.reason == "never_include"

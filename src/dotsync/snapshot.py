@@ -105,7 +105,7 @@ def create_snapshot(
         Metadata for the newly created snapshot.
     """
     now = datetime.now(tz=timezone.utc)
-    snapshot_id = now.strftime("%Y-%m-%dT%H-%M-%S")
+    snapshot_id = now.strftime("%Y-%m-%dT%H-%M-%S") + f"-{now.microsecond // 1000:03d}"
     snap_dir = snapshot_dir_for(snapshot_id)
     snap_dir.mkdir(parents=True, exist_ok=True)
 
@@ -271,7 +271,7 @@ def verify_snapshot(
 
     expected = {e.relative_path for e in entries}
     actual = {
-        str(p.relative_to(snap_dir))
+        p.relative_to(snap_dir).as_posix()
         for p in snap_dir.rglob("*")
         if p.is_file()
     }

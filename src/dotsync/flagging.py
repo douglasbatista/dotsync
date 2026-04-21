@@ -30,7 +30,7 @@ SENSITIVE_PATTERNS: dict[str, re.Pattern[str]] = {
     "anthropic_key": re.compile(r"sk-ant-[A-Za-z0-9-]{20,}"),
     "generic_api_key": re.compile(r"(?i)api[_-]?key\s*[=:]\s*\S+"),
     "generic_token": re.compile(r"(?i)token\s*[=:]\s*\S+"),
-    "email": re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}"),
+    "email": re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     "private_key_pem": re.compile(r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"),
     "connection_string": re.compile(
         r"(?i)(mongodb|postgres|mysql|redis|amqp)://\S+"
@@ -49,7 +49,7 @@ NEVER_INCLUDE: list[str] = [
     ".ssh/id_ed25519",
     ".ssh/id_ecdsa",
     ".gnupg/",
-    "dotsync_key",
+    "dotsync.key",
 ]
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dotsync.config import DotSyncConfig
+    from dotsync.discovery import ConfigFile
+    from dotsync.flagging import FlagResult
+    from dotsync.git_ops import ManifestEntry
 
 app = typer.Typer(name="dotsync", help="Backup, sync, and encrypt dotfiles across workstations.")
 
@@ -55,7 +58,7 @@ def callback(
 # ---------------------------------------------------------------------------
 
 
-def confirm_sensitive_files(flag_results: list) -> list:
+def confirm_sensitive_files(flag_results: list[FlagResult]) -> list[FlagResult]:
     """Prompt user for each file flagged as sensitive.
 
     Updates ``FlagResult.requires_confirmation`` based on user response:
@@ -94,7 +97,7 @@ def confirm_sensitive_files(flag_results: list) -> list:
     return flag_results
 
 
-def _mark_sensitive(flag_results: list) -> None:
+def _mark_sensitive(flag_results: list[FlagResult]) -> None:
     """Mark ConfigFiles as sensitive based on flagging results.
 
     After ``confirm_sensitive_files()`` resolves interactive prompts, any
@@ -115,7 +118,7 @@ def _mark_sensitive(flag_results: list) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_discover_with_progress(cfg: DotSyncConfig) -> list:
+def _run_discover_with_progress(cfg: DotSyncConfig) -> list[ConfigFile]:
     """Run discover() with a live progress display.
 
     Args:
@@ -338,7 +341,7 @@ def discover(
     print_success(f"Registered {len(new_entries)} file(s) into manifest")
 
 
-def _manifest_to_config_files(entries: list, home: Path) -> list:
+def _manifest_to_config_files(entries: list[ManifestEntry], home: Path) -> list[ConfigFile]:
     """Convert ManifestEntry objects to ConfigFile objects for flagging.
 
     Args:
@@ -624,7 +627,7 @@ def rollback(
             print_warning(f"Snapshot {snapshot_id} is incomplete ({n_missing} file(s) missing)")
             if not typer.confirm("Continue anyway?"):
                 raise typer.Exit(code=EXIT_CODES["user_aborted"])
-    except (SnapshotNotFoundError, Exception):
+    except Exception:
         logger.debug("Snapshot verification skipped", exc_info=True)
 
     home = home_dir()

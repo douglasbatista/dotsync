@@ -1,6 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-04-20
+
+### Added
+- User manual (`docs/user_manual.md`) — full end-user guide covering prerequisites, first-time setup, second-machine setup, all seven commands with option tables, configuration reference, security model, AI triage, health checks, snapshots/rollback, cross-platform sync, and troubleshooting
+- README updated with link to user manual, corrected `gitcrypt_key_path` default, condensed git-crypt install table, and `dotsync.log` note
+
+### Fixed
+- `dotsync_key` renamed to `dotsync.key` in `NEVER_INCLUDE` blocklist — matches the actual key filename written by `init_gitcrypt()`
+- Email regex in `SENSITIVE_PATTERNS` simplified (`[A-Z|a-z]` → `[A-Za-z]`) to remove spurious `|` in character class
+- Shell health check now resolves `$SHELL` at runtime (`os.environ.get("SHELL", "/bin/sh")`) instead of passing the literal string `${SHELL}` as the executable — fixes false failures when `$SHELL` is not expanded by the subprocess runner
+- Health check name for user-configured commands now uses only the executable basename (e.g. `zsh` instead of `/usr/bin/zsh`) for cleaner output
+- `check_and_rollback_if_needed()` now catches rollback exceptions and reports failure clearly instead of raising an unrelated error
+- `scan_candidates()` now catches exceptions from individual scan root futures — a broken root no longer aborts the entire scan
+- Snapshot IDs include milliseconds (`%Y-%m-%dT%H-%M-%S-NNN`) to prevent collisions when two snapshots are created within the same second
+- `verify_snapshot()` uses `Path.as_posix()` for relative path comparison — fixes false mismatch on Windows where `str(Path)` uses backslashes
+- `execute_restore()` guards against `None` transform parameters with a safe fallback copy instead of `assert` statements
+- `datetime.now()` calls in `sync.py` and `snapshot.py` are now timezone-aware (`tz=timezone.utc`) — eliminates `DeprecationWarning` and ensures consistent behaviour across platforms
+- `filter_by_profile()` simplified to use `in` membership test
+
+## [Unreleased] — development history
 
 ### Added
 - Initial project structure with Typer CLI
