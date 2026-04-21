@@ -1,11 +1,30 @@
 """Configuration schema and load/save functions for DotSync."""
 
 import os
+import re
 from pathlib import Path
 
 import tomli_w
 import tomllib
 from pydantic import BaseModel, Field, field_validator
+
+_ENV_TOKEN = re.compile(r"\{env:([^}]+)\}")
+
+
+def _substitute_env(value: str) -> str:
+    """Replace ``{env:VAR_NAME}`` tokens with the corresponding environment variable.
+
+    Raises:
+        ValueError: If a referenced environment variable is not set.
+    """
+    def _replace(m: re.Match) -> str:
+        var = m.group(1)
+        val = os.environ.get(var)
+        if val is None:
+            raise ValueError(f"Environment variable '{var}' referenced in config is not set")
+        return val
+
+    return _ENV_TOKEN.sub(_replace, value)
 
 
 class ConfigNotFoundError(Exception):
@@ -29,11 +48,20 @@ class DotSyncConfig(BaseModel):
     remote_url: str | None = Field(None, description="Optional remote Git repository URL")
     gitcrypt_key_path: Path | None = Field(None, description="Path to git-crypt symmetric key file")
     llm_endpoint: str | None = Field(None, description="LiteLLM proxy endpoint for AI triage")
+    llm_api_key: str | None = Field(None, description="Bearer token for the LLM endpoint")
     llm_model: str = Field("claude-haiku-4-5", description="LLM model to use for AI triage")
     snapshot_keep: int = Field(5, description="Number of local snapshots to retain")
     health_checks: list[str] = Field(default_factory=list, description="List of health check commands")
     exclude_patterns: list[str] = Field(default_factory=list, description="Glob patterns to exclude from sync")
     include_extra: list[Path] = Field(default_factory=list, description="Additional paths to include in sync")
+
+    @field_validator("llm_endpoint", "llm_api_key", "llm_model", mode="before")
+    @classmethod
+    def expand_llm_env_vars(cls, v: str | None) -> str | None:
+        """Substitute ``{env:VAR}`` tokens in LLM config fields."""
+        if not isinstance(v, str):
+            return v
+        return _substitute_env(v)
 
     @field_validator("repo_path", "gitcrypt_key_path", mode="before")
     @classmethod
@@ -67,6 +95,7 @@ def default_config() -> DotSyncConfig:
         remote_url=None,
         gitcrypt_key_path=None,
         llm_endpoint=None,
+        llm_api_key=None,
         llm_model="claude-haiku-4-5",
         snapshot_keep=5,
         health_checks=[],
@@ -87,7 +116,7 @@ def load_config() -> DotSyncConfig:
     if not CONFIG_FILE.exists():
         raise ConfigNotFoundError(f"Configuration file not found: {CONFIG_FILE}")
 
-    _OPTIONAL_FIELDS = {"remote_url", "gitcrypt_key_path", "llm_endpoint"}
+    _OPTIONAL_FIELDS = {"remote_url", "gitcrypt_key_path", "llm_endpoint", "llm_api_key"}
 
     with CONFIG_FILE.open("rb") as f:
         data = tomllib.load(f)

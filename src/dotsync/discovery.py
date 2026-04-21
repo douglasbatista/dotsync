@@ -827,6 +827,7 @@ def classify_with_ai(
             "path": None,
             "reason": f"batch {batch_idx + 1} of {total_batches}",
             "count": len(batch),
+            "total": total_batches,
         })
         items = [build_candidate_entry(cf) for cf in batch]
         user_message = json.dumps(items)
@@ -845,6 +846,7 @@ def classify_with_ai(
                 model=cfg.llm_model,
                 system_prompt=system_prompt,
                 user_message=user_message,
+                api_key=cfg.llm_api_key,
             )
             elapsed = time.monotonic() - t0
 

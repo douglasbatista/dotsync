@@ -10,7 +10,7 @@ from dotsync.config import default_config
 from dotsync.discovery import ConfigFile
 from dotsync.flagging import FlagResult, SensitiveMatch
 from dotsync.git_ops import ManifestEntry
-from dotsync.main import EXIT_CODES, _mark_sensitive, app, confirm_sensitive_files
+from dotsync.main import EXIT_CODES, _check_llm_connectivity, _mark_sensitive, app, confirm_sensitive_files
 
 runner = CliRunner()
 
@@ -547,3 +547,81 @@ class TestSyncManifestBased:
         assert result.exit_code == 0
         mock_execute.assert_not_called()
         assert "Dry run" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestCheckLlmConnectivity
+# ---------------------------------------------------------------------------
+
+
+class TestCheckLlmConnectivity:
+    """Tests for the _check_llm_connectivity pre-flight check."""
+
+    def test_does_nothing_when_no_endpoint(self) -> None:
+        """Skips probe entirely when llm_endpoint is None."""
+        cfg = default_config()
+        cfg.llm_endpoint = None
+
+        with patch("dotsync.main.probe_llm") as mock_probe:
+            _check_llm_connectivity(cfg)
+
+        mock_probe.assert_not_called()
+        assert cfg.llm_endpoint is None
+
+    def test_does_nothing_when_probe_succeeds(self) -> None:
+        """Does not mutate cfg when probe returns (True, None)."""
+        cfg = default_config()
+        cfg.llm_endpoint = "http://localhost:8000"
+
+        with patch("dotsync.main.probe_llm", return_value=(True, None)):
+            _check_llm_connectivity(cfg)
+
+        assert cfg.llm_endpoint == "http://localhost:8000"
+
+    def test_clears_endpoint_when_probe_fails_and_user_confirms(self) -> None:
+        """When probe fails and user says yes, llm_endpoint is set to None."""
+        cfg = default_config()
+        cfg.llm_endpoint = "http://localhost:8000"
+
+        with (
+            patch("dotsync.main.probe_llm", return_value=(False, "Connection refused — is the endpoint running?")),
+            patch("typer.confirm", return_value=True),
+        ):
+            _check_llm_connectivity(cfg)
+
+        assert cfg.llm_endpoint is None
+
+    def test_aborts_when_probe_fails_and_user_declines(self) -> None:
+        """When probe fails and user says no, typer.Exit is raised."""
+        import typer as _typer
+
+        cfg = default_config()
+        cfg.llm_endpoint = "http://localhost:8000"
+
+        with (
+            patch("dotsync.main.probe_llm", return_value=(False, "HTTP 401 — check your llm_api_key")),
+            patch("typer.confirm", return_value=False),
+        ):
+            try:
+                _check_llm_connectivity(cfg)
+                assert False, "Expected typer.Exit"
+            except _typer.Exit as exc:
+                assert exc.exit_code == EXIT_CODES["user_aborted"]
+
+    def test_endpoint_preserved_when_probe_fails_and_user_declines(self) -> None:
+        """cfg.llm_endpoint is not mutated before the exit on refusal."""
+        import typer as _typer
+
+        cfg = default_config()
+        cfg.llm_endpoint = "http://localhost:8000"
+
+        with (
+            patch("dotsync.main.probe_llm", return_value=(False, "Request timed out")),
+            patch("typer.confirm", return_value=False),
+        ):
+            try:
+                _check_llm_connectivity(cfg)
+            except _typer.Exit:
+                pass
+
+        assert cfg.llm_endpoint == "http://localhost:8000"

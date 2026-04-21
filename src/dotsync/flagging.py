@@ -219,6 +219,7 @@ def ai_flag_check(path: Path, cfg: DotSyncConfig) -> bool:
             model=cfg.llm_model,
             system_prompt=SENSITIVITY_SYSTEM_PROMPT,
             user_message=payload,
+            api_key=cfg.llm_api_key,
         )
         result = json.loads(content)
         sensitive = bool(result.get("sensitive", False))

@@ -32,6 +32,7 @@ class ScanStats:
     current_dir: str = ""
     phase: str = ""
     ai_batches_done: int = 0
+    ai_batches_total: int = 0
     start_time: float = 0.0
 
 
@@ -67,8 +68,11 @@ def make_scan_display(stats: ScanStats) -> Group:
     table.add_row("Files accepted", str(stats.files_accepted))
     table.add_row("Files rejected", str(stats.files_rejected))
 
-    if stats.ai_batches_done:
-        table.add_row("AI batches", str(stats.ai_batches_done))
+    if stats.ai_batches_done or stats.ai_batches_total:
+        total = stats.ai_batches_total
+        done = stats.ai_batches_done
+        label = f"{done}/{total}" if total else str(done)
+        table.add_row("AI batches", label)
 
     if stats.current_dir:
         # Truncate long paths for display

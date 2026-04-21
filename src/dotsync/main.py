@@ -9,6 +9,7 @@ import typer
 from rich.live import Live
 from typing_extensions import Annotated
 
+from dotsync.llm_client import probe_llm
 from dotsync.logging_setup import setup_logging
 
 if TYPE_CHECKING:
@@ -114,6 +115,44 @@ def _mark_sensitive(flag_results: list[FlagResult]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# LLM connectivity pre-check
+# ---------------------------------------------------------------------------
+
+
+def _check_llm_connectivity(cfg: DotSyncConfig) -> None:
+    """Probe the LLM endpoint before AI triage begins.
+
+    If the probe fails, asks the user whether to continue without AI triage.
+    On confirmation, clears ``cfg.llm_endpoint`` so all subsequent AI calls
+    are skipped. On refusal, exits with ``user_aborted``.
+
+    Args:
+        cfg: DotSync configuration (mutated in-place if user skips AI).
+    """
+    if cfg.llm_endpoint is None:
+        return
+
+    from dotsync.ui import console, print_success, print_warning
+
+    with console.status("Testing LLM connectivity..."):
+        reachable, reason = probe_llm(cfg.llm_endpoint, cfg.llm_model, api_key=cfg.llm_api_key)
+
+    if reachable:
+        print_success(f"LLM endpoint reachable: {cfg.llm_endpoint}")
+        return
+
+    detail = f" ({reason})" if reason else ""
+    print_warning(
+        f"LLM endpoint check failed: {cfg.llm_endpoint}{detail}\n"
+        "  AI triage will be skipped if you continue."
+    )
+    if not typer.confirm("Continue without AI triage?", default=True):
+        raise typer.Exit(code=EXIT_CODES["user_aborted"])
+
+    cfg.llm_endpoint = None
+
+
+# ---------------------------------------------------------------------------
 # Live scan progress
 # ---------------------------------------------------------------------------
 
@@ -156,6 +195,8 @@ def _run_discover_with_progress(cfg: DotSyncConfig) -> list[ConfigFile]:
                 logger.debug("accepted: %s", p)
         elif t == "ai_batch":
             stats.ai_batches_done += 1
+            if event.get("total"):
+                stats.ai_batches_total = event["total"]
         elif t == "ai_error":
             ai_errors.append(event["reason"] or "unknown error")
         # Log pruned/rejected at DEBUG for --verbose visibility
@@ -262,6 +303,8 @@ def discover(
 
     if no_ai:
         cfg.llm_endpoint = None
+
+    _check_llm_connectivity(cfg)
 
     # 1. Scan & classify
     files = _run_discover_with_progress(cfg)
@@ -669,6 +712,7 @@ def status() -> None:
     table.add_row("Repo path", str(cfg.repo_path))
     table.add_row("Remote URL", cfg.remote_url or "(not set)")
     table.add_row("LLM endpoint", cfg.llm_endpoint or "(not set)")
+    table.add_row("LLM API key", "***" if cfg.llm_api_key else "(not set)")
     table.add_row("LLM model", cfg.llm_model)
     table.add_row("Snapshot retention", str(cfg.snapshot_keep))
 

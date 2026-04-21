@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, call, patch
 import httpx
 import pytest
 
-from dotsync.llm_client import LLMError, chat_completion
+from dotsync.llm_client import LLMError, _chat_url, chat_completion, probe_llm
 
 
 def _ok_response(content: str = "hello world") -> MagicMock:
@@ -19,6 +19,32 @@ def _ok_response(content: str = "hello world") -> MagicMock:
     }
     resp.raise_for_status = MagicMock()
     return resp
+
+
+def _ok_probe_response() -> MagicMock:
+    resp = MagicMock(spec=httpx.Response)
+    resp.status_code = 200
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+class TestChatUrl:
+    """Tests for the _chat_url URL normalisation helper."""
+
+    def test_plain_host(self) -> None:
+        assert _chat_url("http://localhost:8000") == "http://localhost:8000/v1/chat/completions"
+
+    def test_trailing_slash_stripped(self) -> None:
+        assert _chat_url("http://localhost:8000/") == "http://localhost:8000/v1/chat/completions"
+
+    def test_v1_suffix_stripped(self) -> None:
+        assert _chat_url("http://localhost:8000/v1") == "http://localhost:8000/v1/chat/completions"
+
+    def test_v1_trailing_slash_stripped(self) -> None:
+        assert _chat_url("http://localhost:8000/v1/") == "http://localhost:8000/v1/chat/completions"
+
+    def test_https_with_v1(self) -> None:
+        assert _chat_url("https://host.example.com/v1") == "https://host.example.com/v1/chat/completions"
 
 
 class TestChatCompletion:
@@ -227,3 +253,128 @@ class TestRetryBehaviour:
             )
 
         assert mock_sleep.call_args_list == [call(2), call(4)]
+
+
+class TestApiKey:
+    """Tests that api_key is sent as a Bearer token."""
+
+    def test_chat_completion_sends_bearer_token(self) -> None:
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_response()) as mock_post:
+            chat_completion(
+                endpoint="http://localhost:8000",
+                model="m",
+                system_prompt="s",
+                user_message="u",
+                api_key="secret-key",
+            )
+
+        headers = mock_post.call_args[1]["headers"]
+        assert headers == {"Authorization": "Bearer secret-key"}
+
+    def test_chat_completion_no_auth_header_when_no_key(self) -> None:
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_response()) as mock_post:
+            chat_completion(
+                endpoint="http://localhost:8000",
+                model="m",
+                system_prompt="s",
+                user_message="u",
+            )
+
+        headers = mock_post.call_args[1]["headers"]
+        assert headers == {}
+
+    def test_probe_llm_sends_bearer_token(self) -> None:
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_probe_response()) as mock_post:
+            ok, _ = probe_llm("http://localhost:8000", "m", api_key="tok")
+
+        assert ok is True
+        headers = mock_post.call_args[1]["headers"]
+        assert headers == {"Authorization": "Bearer tok"}
+
+    def test_probe_llm_no_auth_header_when_no_key(self) -> None:
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_probe_response()) as mock_post:
+            ok, _ = probe_llm("http://localhost:8000", "m")
+
+        assert ok is True
+        headers = mock_post.call_args[1]["headers"]
+        assert headers == {}
+
+
+class TestProbeLlm:
+    """Tests for the probe_llm connectivity check."""
+
+    def test_returns_true_none_on_valid_response(self) -> None:
+        """Returns (True, None) when the endpoint replies successfully."""
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_probe_response()):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is True
+        assert reason is None
+
+    def test_returns_false_with_reason_on_http_503(self) -> None:
+        """Returns (False, 'HTTP 503') for a generic server error."""
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 503
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Service Unavailable", request=MagicMock(), response=mock_resp
+        )
+
+        with patch("dotsync.llm_client.httpx.post", return_value=mock_resp):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is False
+        assert reason == "HTTP 503"
+
+    def test_returns_false_with_reason_on_401(self) -> None:
+        """Returns (False, reason mentioning llm_api_key) on 401 Unauthorized."""
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 401
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized", request=MagicMock(), response=mock_resp
+        )
+
+        with patch("dotsync.llm_client.httpx.post", return_value=mock_resp):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is False
+        assert reason is not None
+        assert "401" in reason
+        assert "llm_api_key" in reason
+
+    def test_returns_false_with_reason_on_403(self) -> None:
+        """Returns (False, reason mentioning llm_api_key) on 403 Forbidden."""
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 403
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Forbidden", request=MagicMock(), response=mock_resp
+        )
+
+        with patch("dotsync.llm_client.httpx.post", return_value=mock_resp):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is False
+        assert reason is not None
+        assert "403" in reason
+        assert "llm_api_key" in reason
+
+    def test_returns_false_on_timeout(self) -> None:
+        """Returns (False, reason) when the request times out."""
+        with patch(
+            "dotsync.llm_client.httpx.post",
+            side_effect=httpx.ConnectTimeout("timed out"),
+        ):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is False
+        assert reason is not None
+
+    def test_returns_false_on_connection_error(self) -> None:
+        """Returns (False, reason) when the endpoint is unreachable."""
+        with patch(
+            "dotsync.llm_client.httpx.post",
+            side_effect=httpx.ConnectError("connection refused"),
+        ):
+            ok, reason = probe_llm("http://localhost:8000", "test-model")
+        assert ok is False
+        assert reason is not None
+
+    def test_uses_custom_timeout(self) -> None:
+        """Passes the timeout argument to httpx.post."""
+        with patch("dotsync.llm_client.httpx.post", return_value=_ok_probe_response()) as mock_post:
+            probe_llm("http://localhost:8000", "test-model", timeout=3)
+        assert mock_post.call_args[1]["timeout"] == 3
