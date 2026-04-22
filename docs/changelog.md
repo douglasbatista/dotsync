@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `orchestrator.py` — pure business-logic layer for discover, sync, and restore workflows (P0.2). Contains `run_discover()`, `run_sync()`, and `run_restore()` returning structured result dataclasses (`DiscoverResult`, `SyncResult`, `RestoreResult`). No Typer/Rich imports; interaction callbacks injected by the CLI layer.
+- `test_orchestrator.py` — unit tests for the orchestration layer covering helpers (`_manifest_to_config_files`, `_resolve_sensitive_confirmations`, `_mark_sensitive`) and all three workflow functions with mocked dependencies.
+- `probe_llm()` in `llm_client.py` — sends a minimal chat-completion request before AI triage begins, returns `(bool, reason)` tuple. Failure reason distinguishes auth errors, wrong model, connection refused, and timeout.
+- `_check_llm_connectivity()` in `main.py` — runs `probe_llm()` before discover, warns with the reason if unreachable, and prompts to continue without AI or abort. Avoids waiting through all batches to discover a bad endpoint.
+- `llm_api_key` field in `DotSyncConfig` — optional bearer token for the LLM endpoint. Supports `{env:VAR}` substitution so secrets stay out of the config file. Threaded through `chat_completion()`, flagging, and discovery.
+- AI batch progress counter in scan display — shows `done/total` batches alongside the existing scan stats.
+- URL normalisation helpers in `llm_client.py`: `_base_url()`, `_chat_url()`, `_models_url()`.
+
 ## [0.2.0] - 2026-04-20
 
 ### Added

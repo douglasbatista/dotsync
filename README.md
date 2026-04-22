@@ -60,6 +60,7 @@ Configuration is stored at `~/.dotsync/config.toml`.
 | `remote_url` | string | | Remote Git URL |
 | `gitcrypt_key_path` | path | `~/.dotsync/dotsync.key` | Path to git-crypt symmetric key |
 | `llm_endpoint` | string | | LiteLLM / OpenAI-compatible endpoint for AI triage |
+| `llm_api_key` | string | | Bearer token for the LLM endpoint (supports `{env:VAR}` substitution) |
 | `llm_model` | string | `claude-haiku-4-5` | LLM model name |
 | `snapshot_keep` | int | `5` | Number of local snapshots to retain (`0` = keep all) |
 | `health_checks` | list | `[]` | Post-operation shell commands |
@@ -134,7 +135,8 @@ uv run mypy src/
 
 ```
 src/dotsync/
-  main.py           # Typer CLI entry point and command definitions
+  main.py           # Typer CLI entry point and command definitions (thin layer)
+  orchestrator.py   # Pure business logic for discover/sync/restore workflows
   config.py         # TOML config schema (Pydantic), load/save
   discovery.py      # File scanner, heuristic + AI classification
   flagging.py       # Sensitive data regex scanning and AI flagging

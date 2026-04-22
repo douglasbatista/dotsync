@@ -8,24 +8,36 @@ DotSync is a CLI tool for backing up, syncing, and encrypting configuration file
 
 ### 1. CLI Interface (`main.py`)
 
-Entry point using Typer with Rich output. Seven commands with structured exit codes (0–5), global `--verbose` flag, and late imports per command.
+Thin Typer entry point with Rich output. Delegates all business logic to `orchestrator.py`. Seven commands with structured exit codes (0–5), global `--verbose` flag, and late imports per command.
 
 - `init` — Initialize config + repo + git-crypt; options: `--repo-path`, `--remote`, `--llm-endpoint`
-- `discover` — Scan, classify, and interactively resolve config files; option: `--no-ai`
-- `sync` — Full pipeline: discover → flag → confirm sensitive → snapshot → sync → commit/push → health checks; options: `--dry-run`, `--no-push`, `--message`
-- `restore` — Pull → snapshot → restore; or `--from-snapshot` for direct snapshot rollback; options: `--dry-run`, `--no-pull`
+- `discover` — Scan, classify, and interactively resolve config files; pre-flight LLM connectivity check; option: `--no-ai`
+- `sync` — Delegates to `run_sync()`; options: `--dry-run`, `--no-push`, `--message`
+- `restore` — Delegates to `run_restore()`; options: `--dry-run`, `--no-pull`, `--from-snapshot`
 - `rollback` — Interactive or explicit snapshot rollback with integrity verification; options: `--dry-run`, `--list`
 - `status` — Config summary, managed files count, snapshot count, git status
 - `config` — View (`--show`) or update (`--set KEY=VALUE`) configuration with key validation
+- `_check_llm_connectivity()` — pre-flight probe before AI triage; warns with reason and prompts continue/abort
 
-### 2. Configuration (`config.py`)
+### 2. Orchestration Layer (`orchestrator.py`)
+
+Pure business logic, no Typer or Rich imports. Interaction callbacks are injected by the CLI so all prompts and tables stay in the presentation layer.
+
+- `run_discover(cfg, *, resolve_pending, resolve_sensitive, confirm_register, progress)` — scan → enforce NEVER_INCLUDE → resolve pending via callback → flag → confirm sensitive → register new files
+- `run_sync(cfg, *, dry_run, no_push, message, resolve_sensitive, confirm_execute)` — load manifest → flag → snapshot → plan → execute → commit/push → health checks
+- `run_restore(cfg, *, dry_run, no_pull, from_snapshot)` — pull → snapshot → plan → execute → health checks; or direct snapshot rollback
+- Result dataclasses: `DiscoverResult`, `SyncResult`, `RestoreResult` — carry everything the CLI needs to render (counts, actions, snapshot metadata) without any I/O
+- Helpers: `_manifest_to_config_files()`, `_resolve_sensitive_confirmations()`, `_mark_sensitive()`
+
+### 3. Configuration (`config.py`)
 
 - Loads/saves TOML configuration from `~/.dotsync/config.toml`
 - Uses Pydantic for schema validation with `field_validator` decorators for automatic path expansion
 - `expand_path(p, resolve)` — expands `~`, `$HOME`, `%USERPROFILE%` via `os.path.expandvars` + `Path.expanduser()`; applied to `repo_path`, `gitcrypt_key_path`, `include_extra` (full resolve) and `exclude_patterns` (expanduser only, no resolve); `health_checks` left unexpanded (shell handles `~` at runtime)
+- `llm_api_key` field — optional bearer token with `{env:VAR}` substitution support so secrets stay out of the config file
 - Default configuration stored in `DotSyncConfig` dataclass
 
-### 3. File Discovery (`discovery.py`)
+### 4. File Discovery (`discovery.py`)
 
 - `ConfigFile` Pydantic model: path, size, include verdict, sensitive flag, reason, os_profile
 - `SAFETY_EXCLUDES`: security invariants (SSH keys, `.gnupg/`, `.dotsync/`, `dotsync.key`) — never included, enforced on extra paths too
@@ -43,7 +55,7 @@ Entry point using Typer with Rich output. Seven commands with structured exit co
 - `classify_with_ai()`: sends unresolved files to LiteLLM proxy in batches of 10 (`MAX_CANDIDATES_PER_BATCH`), caches results in `~/.dotsync/classification_cache.json`. Failed batches are marked `ai:unreachable` individually — remaining batches continue processing. All batch details (paths, timing, verdicts, errors) logged at DEBUG level.
 - `discover()`: orchestrator — scan → heuristic classify → AI classify (if endpoint set) → heuristic-matched files with no AI verdict fall back to `include=True` → remaining ambiguous marked `ask_user`. Accepts optional `progress` callback; emits `phase_start`/`phase_done` events for each pipeline stage.
 
-### 4. Flagging (`flagging.py`)
+### 5. Flagging (`flagging.py`)
 
 Content-based sensitive data detection for files marked `include=True` by discovery. Defense-in-depth layer before files enter the git repo.
 
@@ -54,7 +66,7 @@ Content-based sensitive data detection for files marked `include=True` by discov
 - `flag_all(files, cfg)`: orchestrator — scans included files, only calls AI when no regex matches found, returns `FlagResult` with `requires_confirmation` flag
 - `enforce_never_include(files)`: mutates files matching `NEVER_INCLUDE` to `include=False, reason="never_include"`
 
-### 5. Git Operations (`git_ops.py`)
+### 6. Git Operations (`git_ops.py`)
 
 Storage backbone — manages the dotfiles Git repository and git-crypt encryption.
 
@@ -67,7 +79,7 @@ Storage backbone — manages the dotfiles Git repository and git-crypt encryptio
 - **File copying**: `copy_to_repo()` copies file preserving relative path structure and metadata via `shutil.copy2`
 - Custom exceptions: `MissingDependencyError`, `GitCryptError`, `NoRemoteConfiguredError`, `MergeConflictError`
 
-### 6. Sync Engine (`sync.py`)
+### 7. Sync Engine (`sync.py`)
 
 Orchestrates file operations between the home directory and the dotfiles repository.
 
@@ -78,7 +90,7 @@ Orchestrates file operations between the home directory and the dotfiles reposit
 - **New file registration**: `register_new_files()` accepts pre-confirmed files from the CLI layer, copies to repo and adds manifest entries with `sensitive_flagged` propagated from `ConfigFile.sensitive`; supports dry-run
 - **Conflict detection**: `detect_conflicts()` compares mtime of local and repo copies against `last_sync` — conflict when both sides modified after last sync
 
-### 7. Snapshots (`snapshot.py`)
+### 8. Snapshots (`snapshot.py`)
 
 Local-only timestamped backups of managed files, created automatically before any write operation (sync/restore).
 
@@ -92,7 +104,7 @@ Local-only timestamped backups of managed files, created automatically before an
 - Custom exception: `SnapshotNotFoundError`
 - Snapshots never enter the Git repository
 
-### 8. Health Checks (`health.py`)
+### 9. Health Checks (`health.py`)
 
 Post-operation safety net — runs configurable shell commands after sync/restore to verify the system is still healthy. Automatically rolls back on failure.
 
@@ -104,7 +116,7 @@ Post-operation safety net — runs configurable shell commands after sync/restor
 - **Orchestration**: `post_operation_checks()` is the single integration point for sync/restore — runs all checks, triggers rollback on failure, logs results
 - Custom exception: `HealthCheckFailedError`
 
-### 9. UI (`ui.py`)
+### 10. UI (`ui.py`)
 
 Rich terminal output helpers for consistent formatting across all commands.
 
@@ -117,19 +129,26 @@ Rich terminal output helpers for consistent formatting across all commands.
 ## Data Flow
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   User CLI  │────▶│   Config    │────▶│  Discovery  │
-└─────────────┘     └─────────────┘     └─────────────┘
-                                              │
-                                              ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Git Repo   │◀────│    Sync     │◀────│  Snapshot   │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │
-       ▼
-┌─────────────┐
-│ git-crypt   │
-└─────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
+│   User CLI  │────▶│  Orchestrator    │────▶│   Config    │
+│  (main.py)  │     │ (orchestrator.py)│     └─────────────┘
+└─────────────┘     └──────────────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+       ┌────────────┐ ┌──────────┐ ┌──────────┐
+       │ Discovery  │ │ Flagging │ │ Snapshot │
+       └────────────┘ └──────────┘ └──────────┘
+              │
+              ▼
+       ┌────────────┐     ┌─────────────┐
+       │    Sync    │────▶│  Git Repo   │
+       └────────────┘     └─────────────┘
+                                 │
+                                 ▼
+                          ┌─────────────┐
+                          │  git-crypt  │
+                          └─────────────┘
 ```
 
 ## Security Model
@@ -141,7 +160,8 @@ Rich terminal output helpers for consistent formatting across all commands.
 ## AI Triage (Optional)
 
 - LiteLLM proxy endpoint for AI-powered file triage
-- Configurable via `llm_endpoint` and `llm_model` settings
+- Configurable via `llm_endpoint`, `llm_api_key` (supports `{env:VAR}` substitution), and `llm_model` settings
+- `probe_llm()` — pre-flight connectivity check before discover; returns `(ok, reason)` so failures show auth error / wrong model / connection refused / timeout
 - Uses plain httpx for API calls with retry logic (2 retries, exponential backoff 2s/4s, 90s timeout)
 - Batches of 10 files per request; failed batches don't block remaining batches
 - System prompt uses **environment vs infrastructure** framing: "Is this file part of the user's computing environment, or internal infrastructure the tool recreates on reinstall?"

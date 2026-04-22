@@ -299,12 +299,13 @@ uv run dotsync config --show
 uv run dotsync config --set KEY=VALUE
 ```
 
-Valid keys: `repo_path`, `remote_url`, `gitcrypt_key_path`, `llm_endpoint`, `llm_model`, `snapshot_keep`.
+Valid keys: `repo_path`, `remote_url`, `gitcrypt_key_path`, `llm_endpoint`, `llm_api_key`, `llm_model`, `snapshot_keep`.
 
 Example:
 
 ```bash
 uv run dotsync config --set llm_endpoint=http://localhost:4000
+uv run dotsync config --set llm_api_key={env:OPENROUTER_API_KEY}
 uv run dotsync config --set snapshot_keep=10
 ```
 
@@ -320,6 +321,7 @@ Configuration is stored at `~/.dotsync/config.toml`.
 | `remote_url` | string | | Remote Git URL |
 | `gitcrypt_key_path` | path | `~/.dotsync/dotsync.key` | Path to git-crypt symmetric key |
 | `llm_endpoint` | string | | LiteLLM / OpenAI-compatible endpoint for AI triage |
+| `llm_api_key` | string | | Bearer token for the LLM endpoint (supports `{env:VAR}` substitution) |
 | `llm_model` | string | `claude-haiku-4-5` | LLM model name |
 | `snapshot_keep` | int | `5` | Number of local snapshots to retain (`0` = keep all) |
 | `health_checks` | list | `[]` | Additional post-operation shell commands |
@@ -333,6 +335,7 @@ repo_path = "/home/alice/dotsync-repo"
 remote_url = "git@github.com:alice/dotfiles.git"
 gitcrypt_key_path = "/home/alice/.dotsync/dotsync.key"
 llm_endpoint = "http://localhost:4000"
+llm_api_key = "{env:OPENROUTER_API_KEY}"
 llm_model = "claude-haiku-4-5"
 snapshot_keep = 5
 
@@ -388,15 +391,42 @@ uv run dotsync init --llm-endpoint http://localhost:4000
 uv run dotsync config --set llm_endpoint=http://localhost:4000
 ```
 
+If the endpoint requires an API key, set `llm_api_key`. The `{env:VAR}` syntax reads from an environment variable at runtime so the key never appears in the config file:
+
+```bash
+# Store key in env (e.g. in ~/.zshrc or ~/.bashrc)
+export OPENROUTER_API_KEY=sk-or-...
+
+# Tell DotSync to read it
+uv run dotsync config --set llm_api_key={env:OPENROUTER_API_KEY}
+```
+
+You can also set the key directly (less recommended):
+
+```bash
+uv run dotsync config --set llm_api_key=sk-or-v1-abc123
+```
+
 ### Compatible backends
 
 Any OpenAI-compatible endpoint works:
 
-| Backend | Example endpoint |
-|---------|-----------------|
-| LiteLLM proxy | `http://localhost:4000` |
-| Ollama | `http://localhost:11434/v1` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
+| Backend | Example endpoint | Needs API key? |
+|---------|-----------------|----------------|
+| LiteLLM proxy | `http://localhost:4000` | Depends on setup |
+| Ollama | `http://localhost:11434/v1` | No |
+| OpenRouter | `https://openrouter.ai/api/v1` | Yes |
+
+### Pre-flight connectivity check
+
+Before sending any files to the LLM, DotSync probes the endpoint with a minimal request. If it fails, you see the reason and are asked whether to continue without AI or abort:
+
+```
+Warning: LLM endpoint unreachable — auth error (check llm_api_key)
+Continue without AI triage? [y/N]
+```
+
+Possible reasons: `auth error`, `model not found`, `connection refused`, `timeout`. This avoids waiting through all file batches to discover a bad endpoint.
 
 ### How classification works
 
@@ -538,6 +568,8 @@ git -C ~/dotsync-repo crypt unlock ~/.dotsync/dotsync.key
 ### AI triage not running
 
 - Verify `llm_endpoint` is set: `uv run dotsync config --show`
+- If the pre-flight check fails, DotSync prints the reason (`auth error`, `model not found`, `connection refused`, `timeout`) and prompts to continue without AI — check the reason before answering
+- For auth errors, set `llm_api_key`: `uv run dotsync config --set llm_api_key={env:YOUR_KEY_VAR}`
 - Check the endpoint is reachable: `curl <endpoint>/v1/models`
 - Run with `--verbose` to see batch errors in the console and `~/.dotsync/dotsync.log`
 

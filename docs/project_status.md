@@ -85,19 +85,26 @@
   - [x] `HealthCheckFailedError` exception
   - [x] 19 tests with full coverage
 
+- [x] Orchestration layer (`orchestrator.py`)
+  - [x] `run_discover()` — scan → enforce NEVER_INCLUDE → resolve pending → flag → confirm sensitive → register
+  - [x] `run_sync()` — load manifest → flag → snapshot → plan → execute → commit/push → health checks
+  - [x] `run_restore()` — pull → snapshot → plan → execute → health checks (or direct snapshot rollback)
+  - [x] `DiscoverResult`, `SyncResult`, `RestoreResult` dataclasses for structured CLI rendering
+  - [x] `_manifest_to_config_files()`, `_resolve_sensitive_confirmations()`, `_mark_sensitive()` helpers
+  - [x] No Typer/Rich imports; interaction callbacks injected by caller
+  - [x] `tests/test_orchestrator.py` — unit tests for all helpers and workflow functions
+
 - [x] CLI interface (`main.py`)
   - [x] `init` command with `--repo-path`, `--remote`, `--llm-endpoint`
   - [x] `discover` command with `--no-ai` and interactive resolution; AI debug details via `--verbose`
+  - [x] `_check_llm_connectivity()` — probes LLM endpoint before discover, warns and prompts to continue/abort
   - [x] `sync` command with full pipeline orchestration
   - [x] `restore` command with pull + restore or direct snapshot rollback
   - [x] `rollback` command with interactive selection and integrity verification
   - [x] `status` command with config/repo/snapshot summary
   - [x] `config` command with `--show` and `--set KEY=VALUE`
-  - [x] `confirm_sensitive_files()` — I/E/S interactive confirmation
-  - [x] `_mark_sensitive()` — post-confirmation helper that sets `ConfigFile.sensitive=True` for files with detections
-  - [x] `_manifest_to_config_files()` propagates `sensitive_flagged` → `sensitive` for round-trip consistency
   - [x] Structured exit codes (0–5)
-  - [x] 11 tests covering confirmation, mark_sensitive, config, and error handling
+  - [x] Tests updated to cover LLM connectivity pre-check
 
 - [x] Rich UI helpers (`ui.py`)
   - [x] `print_success()`, `print_warning()`, `print_error()`, `print_section()`
@@ -138,12 +145,19 @@
   - [x] `rollback --list` shows snapshots with correct triggers and retention
   - [x] `init` idempotent (second run with overwrite confirmation)
 
+- [x] LLM client (`llm_client.py`)
+  - [x] `probe_llm()` — minimal pre-flight request returning `(bool, reason)` with error classification
+  - [x] `_base_url()`, `_chat_url()`, `_models_url()` — URL normalisation helpers
+  - [x] `llm_api_key` field in `DotSyncConfig` with `{env:VAR}` substitution; threaded through `chat_completion()`, flagging, and discovery
+
 - [x] Test infrastructure
   - [x] `pytest.mark.integration` and `pytest.mark.e2e` markers in `pyproject.toml`
-  - [x] 285+ tests total (unit + 15 integration + 6 e2e + 2 perf deselected)
+  - [x] 330 tests total (328 collected, 2 perf deselected)
 
 - [x] README.md with user-facing documentation
   - [x] Features, quick start, command reference, configuration, security, AI triage, development, and project structure sections
+  - [x] `llm_api_key` added to configuration table
+  - [x] `orchestrator.py` added to project structure
 
 ### In Progress
 - (none)
