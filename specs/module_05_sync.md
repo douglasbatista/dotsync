@@ -59,9 +59,8 @@ The sync engine orchestrates file operations between the home directory and the 
 
 ### Step 5.5 — New File Registration
 
-`register_new_files(new_files, flag_results, repo_path, home, cfg, dry_run)`:
-1. Build confirmed set from `flag_results` where `requires_confirmation == False`
-2. For each file in `new_files` that's confirmed and `include == True`:
+`register_new_files(new_files, repo_path, home, cfg, dry_run)`:
+1. For each file in `new_files` that's `include == True`:
    - Create `ManifestEntry` with current timestamp
    - If not dry_run: `copy_to_repo()` and `add_to_manifest()`
 3. Return list of new entries
@@ -83,5 +82,5 @@ The sync engine orchestrates file operations between the home directory and the 
 
 1. **Path transform scope**: Only transform paths in value positions (after `=`, `:`, or in quotes) to avoid mangling URLs and other content.
 2. **execute_sync does its own copy**: Uses `shutil.copy2` directly rather than always delegating to `git_ops.copy_to_repo`, because transform cases need to write transformed content.
-3. **register_new_files accepts pre-filtered list**: No user I/O — receives already-confirmed files from the CLI layer.
+3. **register_new_files accepts included files directly**: No user I/O — receives files with `include=True` from the CLI layer. The `flag_results` parameter was removed; sensitive data flagging is now sync-only.
 4. **Conflict detection is mtime-based**: Both local and repo mtimes must exceed `last_sync` for a conflict.

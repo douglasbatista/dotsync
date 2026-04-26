@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Scan files marked `include=True` by the discovery module for credentials, API keys, PEM blocks, and other sensitive data before they enter the git repository. This is a defense-in-depth layer — git-crypt encrypts everything, but users should consciously decide about files containing secrets.
+Scan files marked `include=True` by the discovery module for credentials, API keys, PEM blocks, and other sensitive data before they enter the git repository. Users should consciously decide about files containing secrets.
 
 ---
 
@@ -35,7 +35,6 @@ Defense-in-depth blocklist — these files are never included even if discovery 
 .ssh/id_ed25519
 .ssh/id_ecdsa
 .gnupg/          (directory prefix match)
-dotsync_key
 ```
 
 Note: `SAFETY_EXCLUDES` in discovery already blocks these at scan time; this is a second layer.
@@ -86,6 +85,10 @@ class SensitiveMatch:
 - Run `scan_file_for_secrets` on each
 - Run `ai_flag_check` only if no regex matches found (avoid redundant AI calls)
 - Set `requires_confirmation = bool(matches) or ai_flagged`
+
+> **Note:** `flag_all()` is called only during `sync`, not during `discover`. Discovery
+> focuses on classification and registration; sensitive data verification happens when
+> files are about to be committed to the repository.
 
 ### `FlagResult` dataclass
 

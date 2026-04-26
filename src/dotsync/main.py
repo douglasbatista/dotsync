@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from dotsync.flagging import FlagResult
     from dotsync.git_ops import ManifestEntry
 
-app = typer.Typer(name="dotsync", help="Backup, sync, and encrypt dotfiles across workstations.")
+app = typer.Typer(name="dotsync", help="Backup, sync, and restore dotfiles across workstations.")
 
 logger = logging.getLogger("dotsync")
 
@@ -233,8 +233,8 @@ def init(
     from pathlib import Path
 
     from dotsync.config import CONFIG_FILE, default_config, save_config
-    from dotsync.git_ops import MissingDependencyError, check_dependencies, init_gitcrypt, init_repo, set_remote
-    from dotsync.ui import console, print_error, print_success, print_warning
+    from dotsync.git_ops import MissingDependencyError, check_dependencies, init_repo, set_remote
+    from dotsync.ui import console, print_error, print_success
 
     try:
         check_dependencies()
@@ -260,20 +260,6 @@ def init(
 
     print_success(f"Repository initialized at {cfg.repo_path}")
 
-    # git-crypt setup
-    key_path = cfg.repo_path / "dotsync.key"
-    try:
-        with console.status("Setting up git-crypt..."):
-            init_gitcrypt(cfg.repo_path, key_path)
-        cfg.gitcrypt_key_path = key_path
-        print_success("git-crypt initialized")
-        print_warning(
-            f"Key exported to {key_path} — back it up securely and never commit it!"
-        )
-    except Exception:
-        print_warning("git-crypt init skipped (may already be initialized)")
-        logger.debug("git-crypt init error", exc_info=True)
-
     if remote:
         set_remote(repo, remote)
         cfg.remote_url = remote
@@ -287,9 +273,9 @@ def init(
 def discover(
     no_ai: Annotated[bool, typer.Option("--no-ai", help="Skip AI classification")] = False,
 ) -> None:
-    """Discover, flag, and register configuration files into the manifest."""
+    """Discover and register configuration files into the manifest."""
     from dotsync.config import ConfigNotFoundError, load_config
-    from dotsync.flagging import enforce_never_include, flag_all
+    from dotsync.flagging import enforce_never_include
     from dotsync.git_ops import init_repo, load_manifest
     from dotsync.platform_utils import home_dir
     from dotsync.sync import register_new_files
@@ -338,16 +324,7 @@ def discover(
     # 2. Enforce never-include blocklist
     enforce_never_include(files)
 
-    # 3. Flag sensitive data
-    included_files = [f for f in files if f.include is True]
-    with console.status("Checking for sensitive data..."):
-        flag_results = flag_all(included_files, cfg)
-
-    # 4. Interactive confirmation for flagged files
-    confirm_sensitive_files(flag_results)
-    _mark_sensitive(flag_results)
-
-    # 5. Load manifest to identify already-tracked files
+    # 3. Load manifest to identify already-tracked files
     manifest = load_manifest(cfg.repo_path)
     tracked_paths = {e.relative_path for e in manifest}
     to_register = [
@@ -360,7 +337,7 @@ def discover(
     ]
     excluded_final = [f for f in files if f.include is not True]
 
-    # 6. Enhanced summary
+    # 4. Enhanced summary
     print_section("Summary")
     console.print(
         f"  [green]{len(to_register)}[/green] file(s) to register, "
@@ -368,7 +345,7 @@ def discover(
         f"[red]{len(excluded_final)}[/red] excluded"
     )
 
-    # 7. Register new files
+    # 5. Register new files
     if not to_register:
         print_success("Nothing new to register")
         return
@@ -379,7 +356,7 @@ def discover(
 
     home = home_dir()
     init_repo(cfg)
-    new_entries = register_new_files(to_register, flag_results, cfg.repo_path, home, cfg)
+    new_entries = register_new_files(to_register, cfg.repo_path, home, cfg)
 
     print_success(f"Registered {len(new_entries)} file(s) into manifest")
 

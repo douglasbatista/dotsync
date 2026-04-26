@@ -9,7 +9,7 @@ import pytest
 
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import ConfigFile, discover
-from dotsync.flagging import FlagResult, flag_all
+from dotsync.flagging import flag_all
 from dotsync.git_ops import ManifestEntry, init_repo, load_manifest, save_manifest
 from dotsync.health import (
     HealthCheck,
@@ -150,7 +150,6 @@ class TestDiscoveryFlaggingRegistration:
     def test_register_propagates_sensitive_flag(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """Registering a flagged file sets sensitive_flagged=True in manifest."""
         home = dotsync_env["home"]
@@ -176,15 +175,8 @@ class TestDiscoveryFlaggingRegistration:
             os_profile="shared",
         )
 
-        # Simulate flagging result: confirmed for inclusion, has matches
-        fr = FlagResult(
-            config_file=cf,
-            matches=[],
-            ai_flagged=False,
-            requires_confirmation=False,
-        )
-
-        entries = register_new_files([cf], [fr], repo, home, cfg)
+        # Register the file — sensitive flag is set directly on ConfigFile
+        entries = register_new_files([cf], repo, home, cfg)
 
         assert len(entries) == 1
         assert entries[0].sensitive_flagged is True
@@ -225,7 +217,6 @@ class TestSyncPipeline:
     def test_sync_copies_files_to_repo(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """After plan+execute sync, files exist in repo with correct content."""
         home = dotsync_env["home"]
@@ -246,7 +237,6 @@ class TestSyncPipeline:
     def test_sync_updates_manifest(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """After sync, manifest entries match synced files."""
         home = dotsync_env["home"]
@@ -265,7 +255,6 @@ class TestSyncPipeline:
     def test_sync_dry_run_no_changes(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """Dry-run sync does not copy files to repo."""
         home = dotsync_env["home"]
@@ -291,7 +280,6 @@ class TestRestorePipeline:
     def test_restore_copies_from_repo_to_home(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """Restore overwrites local files with repo content."""
         home = dotsync_env["home"]
@@ -327,7 +315,6 @@ class TestRestorePipeline:
     def test_restore_with_path_transform(
         self,
         dotsync_env: dict[str, Any],
-        mock_gitcrypt: Any,
     ) -> None:
         """Restore transforms paths when source and target OS differ."""
         home = dotsync_env["home"]

@@ -7,7 +7,7 @@
 - [x] CLI entry point using Typer
 - [x] Configuration schema with Pydantic
   - [x] `expand_path()` utility for `~` / `$HOME` / `%USERPROFILE%` expansion
-  - [x] Pydantic `field_validator` decorators: `repo_path`/`gitcrypt_key_path` (expand + resolve), `include_extra` (expand + resolve each), `exclude_patterns` (expanduser only, no resolve), `health_checks` (no expansion)
+  - [x] Pydantic `field_validator` decorators: `repo_path`/`include_extra` (expand + resolve each), `exclude_patterns` (expanduser only, no resolve), `health_checks` (no expansion)
   - [x] `include_extra` typed as `list[Path]` (was `list[str]`)
 - [x] `init` command implementation
   - [x] Creates default configuration
@@ -45,22 +45,21 @@
   - [x] `flag_all()` orchestrator
   - [x] `enforce_never_include()` blocklist enforcement
   - [x] 21 tests with full coverage
-- [x] Git & git-crypt integration (`git_ops.py`)
+- [x] Git integration (`git_ops.py`)
   - [x] `check_dependencies()` with platform-specific install hints
   - [x] `init_repo()` — idempotent repo init with `.gitattributes` and manifest
-  - [x] `init_gitcrypt()` / `unlock_gitcrypt()` — subprocess wrappers
   - [x] `set_remote()` / `get_remote()` — origin management
   - [x] `ManifestEntry` with CRUD functions (dedup, filter)
   - [x] `commit_and_push()` / `pull()` with conflict detection
   - [x] `copy_to_repo()` — preserves relative paths and metadata
-  - [x] 24 tests with full coverage
+  - [x] 21 tests with full coverage
 
 - [x] Sync engine (`sync.py`)
   - [x] `filter_by_profile()` — OS profile filtering
   - [x] `transform_paths()` — cross-platform path transformation with URL protection
   - [x] `SyncAction` / `plan_sync()` / `execute_sync()` — home → repo sync
   - [x] `RestoreAction` / `plan_restore()` / `execute_restore()` — repo → home restore
-  - [x] `register_new_files()` — new file registration (propagates `ConfigFile.sensitive` → `ManifestEntry.sensitive_flagged`)
+  - [x] `register_new_files()` — new file registration (propagates `ConfigFile.sensitive` → `ManifestEntry.sensitive_flagged`; `flag_results` parameter removed)
   - [x] `Conflict` / `detect_conflicts()` — mtime-based conflict detection
   - [x] 26 tests with full coverage
 
@@ -86,7 +85,7 @@
   - [x] 19 tests with full coverage
 
 - [x] Orchestration layer (`orchestrator.py`)
-  - [x] `run_discover()` — scan → enforce NEVER_INCLUDE → resolve pending → flag → confirm sensitive → register
+  - [x] `run_discover()` — scan → enforce NEVER_INCLUDE → resolve pending → register new files (sensitive data flagging removed from discover; now sync-only)
   - [x] `run_sync()` — load manifest → flag → snapshot → plan → execute → commit/push → health checks
   - [x] `run_restore()` — pull → snapshot → plan → execute → health checks (or direct snapshot rollback)
   - [x] `DiscoverResult`, `SyncResult`, `RestoreResult` dataclasses for structured CLI rendering
@@ -119,7 +118,7 @@
   - [x] 11 tests covering CLI (up from 7)
 
 - [x] Integration tests (`test_integration.py`)
-  - [x] Shared test fixtures in `tests/conftest.py`: `dotsync_env`, `sample_dotfiles`, `mock_gitcrypt`, `mock_health_checks`
+  - [x] Shared test fixtures in `tests/conftest.py`: `dotsync_env`, `sample_dotfiles`, `mock_health_checks`
   - [x] Config → Discovery pipeline (3 tests): home dotfile discovery, exclude patterns, repo_path exclusion
   - [x] Discovery → Flagging → Registration (3 tests): secret detection, clean file pass-through, sensitive flag propagation
   - [x] Sync pipeline (3 tests): file copy to repo, manifest update, dry-run no-op

@@ -190,24 +190,23 @@ def run_discover(
     cfg: DotSyncConfig,
     *,
     resolve_pending: Callable[[list[ConfigFile]], None] | None = None,
-    resolve_sensitive: Callable[[FlagResult], str] | None = None,
     confirm_register: Callable[[int], bool] | None = None,
     progress: ProgressCallback | None = None,
 ) -> DiscoverResult:
     """Run the full discover workflow.
 
     Scans for config files, classifies them, enforces the NEVER_INCLUDE
-    blocklist, flags sensitive data, resolves confirmations, and registers
-    new files into the manifest.
+    blocklist, resolves pending classifications, and registers new files
+    into the manifest.
+
+    Sensitive data flagging is performed at sync time, not during
+    discovery — see :func:`run_sync`.
 
     Args:
         cfg: DotSync configuration.
         resolve_pending: Optional callback receiving all pending ConfigFile
             objects.  The callback should mutate ``include`` / ``reason`` in
             place.  When ``None``, pending files are treated as excluded.
-        resolve_sensitive: Optional callback for each FlagResult that
-            requires confirmation. Return ``"I"``, ``"E"``, or ``"S"``.
-            When ``None``, defaults to ``"S"`` (skip).
         confirm_register: Optional callback receiving the number of files
             to register. Return ``True`` to proceed. When ``None``,
             registration is skipped.
@@ -235,15 +234,7 @@ def run_discover(
                 f.include = False
                 f.reason = "user_excluded"
 
-    # 4. Flag sensitive data among included files
-    included_files = [f for f in files if f.include is True]
-    flag_results = flag_all(included_files, cfg)
-
-    # 5. Resolve sensitive confirmations
-    _resolve_sensitive_confirmations(flag_results, resolve_sensitive)
-    _mark_sensitive(flag_results)
-
-    # 6. Load manifest to identify already-tracked files
+    # 4. Load manifest to identify already-tracked files
     manifest = load_manifest(cfg.repo_path)
     tracked_paths = {e.relative_path for e in manifest}
 
@@ -255,11 +246,11 @@ def run_discover(
     ]
     excluded_final = [f for f in files if f.include is not True]
 
-    # 7. Register new files
+    # 5. Register new files
     registered_count = 0
     if to_register:
         if confirm_register is not None and confirm_register(len(to_register)):
-            register_new_files(to_register, flag_results, cfg.repo_path, home, cfg)
+            register_new_files(to_register, cfg.repo_path, home, cfg)
             registered_count = len(to_register)
 
     return DiscoverResult(

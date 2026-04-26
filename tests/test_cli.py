@@ -265,7 +265,6 @@ class TestDiscoverProgress:
         with (
             patch("dotsync.discovery.discover") as mock_discover,
             patch("dotsync.flagging.enforce_never_include", return_value=[]),
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=[]),
         ):
             mock_discover.return_value = []
@@ -309,7 +308,6 @@ class TestDiscoverProgress:
             patch("dotsync.discovery.discover", side_effect=fake_discover),
             patch("dotsync.main.logger") as mock_logger,
             patch("dotsync.flagging.enforce_never_include", return_value=[]),
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=[]),
         ):
             result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
@@ -363,7 +361,6 @@ class TestDiscoverProgress:
             patch("dotsync.discovery.discover", side_effect=fake_discover),
             patch("dotsync.main.logger") as mock_logger,
             patch("dotsync.flagging.enforce_never_include", return_value=[]),
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=[]),
         ):
             result = runner.invoke(app, ["--verbose", "discover", "--no-ai"])
@@ -404,7 +401,6 @@ class TestDiscoverRegistration:
         with (
             patch("dotsync.discovery.discover", return_value=files),
             patch("dotsync.flagging.enforce_never_include"),
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=[]),
             patch("dotsync.git_ops.init_repo"),
             patch("dotsync.platform_utils.home_dir", return_value=Path("/home/test")),
@@ -445,7 +441,6 @@ class TestDiscoverRegistration:
         with (
             patch("dotsync.discovery.discover", return_value=files),
             patch("dotsync.flagging.enforce_never_include"),
-            patch("dotsync.flagging.flag_all", return_value=[]),
             patch("dotsync.git_ops.load_manifest", return_value=manifest),
         ):
             result = runner.invoke(app, ["discover", "--no-ai"])

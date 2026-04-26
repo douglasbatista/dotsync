@@ -2,7 +2,7 @@
 
 ## Overview
 
-DotSync is a CLI tool for backing up, syncing, and encrypting configuration files (dotfiles) across Windows and Linux workstations. The tool uses a Git repository with git-crypt symmetric encryption for secure storage.
+DotSync is a CLI tool for backing up, syncing, and restoring configuration files (dotfiles) across Windows and Linux workstations. The tool uses a Git repository for storage, with optional AI-powered file classification.
 
 ## Core Components
 
@@ -10,7 +10,7 @@ DotSync is a CLI tool for backing up, syncing, and encrypting configuration file
 
 Thin Typer entry point with Rich output. Delegates all business logic to `orchestrator.py`. Seven commands with structured exit codes (0–5), global `--verbose` flag, and late imports per command.
 
-- `init` — Initialize config + repo + git-crypt; options: `--repo-path`, `--remote`, `--llm-endpoint`
+- `init` — Initialize config + repo; options: `--repo-path`, `--remote`, `--llm-endpoint`
 - `discover` — Scan, classify, and interactively resolve config files; pre-flight LLM connectivity check; option: `--no-ai`
 - `sync` — Delegates to `run_sync()`; options: `--dry-run`, `--no-push`, `--message`
 - `restore` — Delegates to `run_restore()`; options: `--dry-run`, `--no-pull`, `--from-snapshot`
@@ -23,7 +23,7 @@ Thin Typer entry point with Rich output. Delegates all business logic to `orches
 
 Pure business logic, no Typer or Rich imports. Interaction callbacks are injected by the CLI so all prompts and tables stay in the presentation layer.
 
-- `run_discover(cfg, *, resolve_pending, resolve_sensitive, confirm_register, progress)` — scan → enforce NEVER_INCLUDE → resolve pending via callback → flag → confirm sensitive → register new files
+- `run_discover(cfg, *, resolve_pending, confirm_register, progress)` — scan → enforce NEVER_INCLUDE → resolve pending via callback → register new files. Sensitive data flagging is performed at sync time only.
 - `run_sync(cfg, *, dry_run, no_push, message, resolve_sensitive, confirm_execute)` — load manifest → flag → snapshot → plan → execute → commit/push → health checks
 - `run_restore(cfg, *, dry_run, no_pull, from_snapshot)` — pull → snapshot → plan → execute → health checks; or direct snapshot rollback
 - Result dataclasses: `DiscoverResult`, `SyncResult`, `RestoreResult` — carry everything the CLI needs to render (counts, actions, snapshot metadata) without any I/O
@@ -33,14 +33,14 @@ Pure business logic, no Typer or Rich imports. Interaction callbacks are injecte
 
 - Loads/saves TOML configuration from `~/.dotsync/config.toml`
 - Uses Pydantic for schema validation with `field_validator` decorators for automatic path expansion
-- `expand_path(p, resolve)` — expands `~`, `$HOME`, `%USERPROFILE%` via `os.path.expandvars` + `Path.expanduser()`; applied to `repo_path`, `gitcrypt_key_path`, `include_extra` (full resolve) and `exclude_patterns` (expanduser only, no resolve); `health_checks` left unexpanded (shell handles `~` at runtime)
+- `expand_path(p, resolve)` — expands `~`, `$HOME`, `%USERPROFILE%` via `os.path.expandvars` + `Path.expanduser()`; applied to `repo_path`, `include_extra` (full resolve) and `exclude_patterns` (expanduser only, no resolve); `health_checks` left unexpanded (shell handles `~` at runtime)
 - `llm_api_key` field — optional bearer token with `{env:VAR}` substitution support so secrets stay out of the config file
 - Default configuration stored in `DotSyncConfig` dataclass
 
 ### 4. File Discovery (`discovery.py`)
 
 - `ConfigFile` Pydantic model: path, size, include verdict, sensitive flag, reason, os_profile
-- `SAFETY_EXCLUDES`: security invariants (SSH keys, `.gnupg/`, `.dotsync/`, `dotsync.key`) — never included, enforced on extra paths too
+- `SAFETY_EXCLUDES`: security invariants (SSH keys, `.gnupg/`, `.dotsync/`) — never included, enforced on extra paths too
 - `PRUNE_DIRS`: ~30 directory names pruned by exact name match during walk (`.git`, `node_modules`, `__pycache__`, cache dirs, build dirs, etc.)
 - `_PRUNE_PREFIXES`: multi-segment prefixes (`.local/share/`, `.local/lib/`) pruned by prefix match
 - `ALLOWED_EXTENSIONS`: 14 config file extensions accepted by whitelist (`.toml`, `.yaml`, `.yml`, `.json`, `.jsonc`, `.ini`, `.cfg`, `.conf`, `.config`, `.xml`, `.properties`, `.env`, `.rc`, `.plist`)
@@ -60,7 +60,7 @@ Pure business logic, no Typer or Rich imports. Interaction callbacks are injecte
 Content-based sensitive data detection for files marked `include=True` by discovery. Defense-in-depth layer before files enter the git repo.
 
 - `SENSITIVE_PATTERNS`: 11 compiled regexes (GitHub tokens, AWS keys, OpenAI/Anthropic keys, PEM blocks, connection strings, generic token/api_key, email)
-- `NEVER_INCLUDE`: hardcoded blocklist (`.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/`, `dotsync_key`) — defense-in-depth behind `SAFETY_EXCLUDES`
+- `NEVER_INCLUDE`: hardcoded blocklist (`.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/`) — defense-in-depth behind `SAFETY_EXCLUDES`
 - `scan_file_for_secrets(path)`: line-by-line regex scan, skips `#`-commented lines for generic patterns, redacts matched values in preview
 - `ai_flag_check(path, cfg)`: sends first 30 lines to LLM for sensitivity assessment, caches results by `{path}:{mtime}`, fails open on error
 - `flag_all(files, cfg)`: orchestrator — scans included files, only calls AI when no regex matches found, returns `FlagResult` with `requires_confirmation` flag
@@ -68,16 +68,15 @@ Content-based sensitive data detection for files marked `include=True` by discov
 
 ### 6. Git Operations (`git_ops.py`)
 
-Storage backbone — manages the dotfiles Git repository and git-crypt encryption.
+Storage backbone — manages the dotfiles Git repository.
 
-- **Dependency checks**: `check_dependencies()` verifies `git` and `git-crypt` are on PATH with platform-specific install hints
-- **Repo init**: `init_repo(cfg)` creates/opens repo, writes `.gitattributes` (git-crypt catch-all + exclusions), empty `.dotsync_manifest.json`, initial commit; idempotent
-- **git-crypt**: `init_gitcrypt()` runs `git-crypt init` + `export-key` via subprocess; `unlock_gitcrypt()` runs `git-crypt unlock`; errors wrapped as `GitCryptError`
+- **Dependency checks**: `check_dependencies()` verifies `git` is on PATH with platform-specific install hints
+- **Repo init**: `init_repo(cfg)` creates/opens repo, writes `.gitattributes`, empty `.dotsync_manifest.json`, initial commit; idempotent
 - **Remote management**: `set_remote()` creates/updates origin; `get_remote()` returns URL or `None`
 - **Manifest**: `ManifestEntry` dataclass tracks `relative_path`, `os_profile`, `added_at`, `sensitive_flagged`; CRUD via `load_manifest()`, `save_manifest()`, `add_to_manifest()` (dedup by path), `remove_from_manifest()`
 - **Commit/push/pull**: `commit_and_push()` stages all, commits, pushes (raises `NoRemoteConfiguredError` if no origin); `pull()` fetches and checks `unmerged_blobs()` for `MergeConflictError`
 - **File copying**: `copy_to_repo()` copies file preserving relative path structure and metadata via `shutil.copy2`
-- Custom exceptions: `MissingDependencyError`, `GitCryptError`, `NoRemoteConfiguredError`, `MergeConflictError`
+- Custom exceptions: `MissingDependencyError`, `NoRemoteConfiguredError`, `MergeConflictError`
 
 ### 7. Sync Engine (`sync.py`)
 
@@ -144,18 +143,16 @@ Rich terminal output helpers for consistent formatting across all commands.
        ┌────────────┐     ┌─────────────┐
        │    Sync    │────▶│  Git Repo   │
        └────────────┘     └─────────────┘
-                                 │
-                                 ▼
-                          ┌─────────────┐
-                          │  git-crypt  │
-                          └─────────────┘
 ```
 
 ## Security Model
 
-- All sensitive data encrypted using git-crypt symmetric encryption
-- Encryption key stored separately from repository
-- No secrets stored in configuration files
+- Multi-layer secret protection prevents secrets from reaching the repository
+- Safety excludes block SSH keys and `.gnupg/` at the discovery layer
+- Regex and AI scanning flag sensitive files at sync time, before they are committed to the repo
+- NEVER_INCLUDE blocklist provides a backstop at discovery time
+- Users must consciously decide to include files flagged as sensitive during sync
+- Discover focuses on classification and registration; sensitive data verification happens when syncing to the repository
 
 ## AI Triage (Optional)
 

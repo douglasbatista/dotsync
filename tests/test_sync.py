@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import ConfigFile
-from dotsync.flagging import FlagResult
 from dotsync.git_ops import ManifestEntry, MANIFEST_FILENAME
 from dotsync.sync import (
-    Conflict,
     RestoreAction,
     SyncAction,
     detect_conflicts,
@@ -377,9 +373,7 @@ class TestRegisterNewFiles:
 
         cfg = _cfg(tmp_path)
         cf = _config_file(tmp_path, ".bashrc", include=True)
-        fr = FlagResult(config_file=cf, requires_confirmation=False)
-
-        entries = register_new_files([cf], [fr], repo, home, cfg)
+        entries = register_new_files([cf], repo, home, cfg)
 
         assert len(entries) == 1
         assert (repo / ".bashrc").exists()
@@ -392,9 +386,8 @@ class TestRegisterNewFiles:
 
         cfg = _cfg(tmp_path)
         cf = _config_file(tmp_path, ".vimrc", include=True)
-        fr = FlagResult(config_file=cf, requires_confirmation=False)
 
-        register_new_files([cf], [fr], repo, home, cfg)
+        register_new_files([cf], repo, home, cfg)
 
         manifest_data = json.loads(
             (repo / MANIFEST_FILENAME).read_text(encoding="utf-8")
@@ -412,9 +405,8 @@ class TestRegisterNewFiles:
         cfg = _cfg(tmp_path)
         cf = _config_file(tmp_path, ".env_config", include=True)
         cf.sensitive = True
-        fr = FlagResult(config_file=cf, requires_confirmation=False)
 
-        entries = register_new_files([cf], [fr], repo, home, cfg)
+        entries = register_new_files([cf], repo, home, cfg)
 
         assert len(entries) == 1
         assert entries[0].sensitive_flagged is True
@@ -433,9 +425,8 @@ class TestRegisterNewFiles:
 
         cfg = _cfg(tmp_path)
         cf = _config_file(tmp_path, ".bashrc", include=True)
-        fr = FlagResult(config_file=cf, requires_confirmation=False)
 
-        entries = register_new_files([cf], [fr], repo, home, cfg)
+        entries = register_new_files([cf], repo, home, cfg)
 
         assert len(entries) == 1
         assert entries[0].sensitive_flagged is False
@@ -448,9 +439,8 @@ class TestRegisterNewFiles:
 
         cfg = _cfg(tmp_path)
         cf = _config_file(tmp_path, ".bashrc", include=True)
-        fr = FlagResult(config_file=cf, requires_confirmation=False)
 
-        entries = register_new_files([cf], [fr], repo, home, cfg, dry_run=True)
+        entries = register_new_files([cf], repo, home, cfg, dry_run=True)
 
         assert len(entries) == 1
         assert not (repo / ".bashrc").exists()

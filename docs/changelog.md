@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- Sensitive data flagging is now performed only at sync time, not during discover. The discover workflow focuses on classification and registration; secret detection runs when files are about to be committed to the repository (sync). `run_discover()` no longer calls `flag_all()` and no longer accepts `resolve_sensitive` callback. `register_new_files()` no longer requires `flag_results` parameter — all included files are registered directly. Removed `dotsync.flagging.flag_all` from discover command in CLI.
+- Removed git-crypt encryption. Files are no longer encrypted in the repository — push only to private remotes. Removed `gitcrypt_key_path` config field, `init_gitcrypt()`/`unlock_gitcrypt()` functions, `GitCryptError` exception, `dotsync.key` from `SAFETY_EXCLUDES` and `NEVER_INCLUDE`, git-crypt dependency check, and `.gitattributes` encryption rules. The `.gitattributes` file now only excludes itself and the manifest from diff filtering.
+
 ### Added
 - `orchestrator.py` — pure business-logic layer for discover, sync, and restore workflows (P0.2). Contains `run_discover()`, `run_sync()`, and `run_restore()` returning structured result dataclasses (`DiscoverResult`, `SyncResult`, `RestoreResult`). No Typer/Rich imports; interaction callbacks injected by the CLI layer.
 - `test_orchestrator.py` — unit tests for the orchestration layer covering helpers (`_manifest_to_config_files`, `_resolve_sensitive_confirmations`, `_mark_sensitive`) and all three workflow functions with mocked dependencies.

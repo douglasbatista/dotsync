@@ -17,7 +17,6 @@ from typing import Literal
 
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import ConfigFile
-from dotsync.flagging import FlagResult
 from dotsync.git_ops import ManifestEntry, add_to_manifest, copy_to_repo
 
 # ---------------------------------------------------------------------------
@@ -349,7 +348,6 @@ def execute_restore(
 
 def register_new_files(
     new_files: list[ConfigFile],
-    flag_results: list[FlagResult],
     repo_path: Path,
     home: Path,
     cfg: DotSyncConfig,
@@ -357,12 +355,10 @@ def register_new_files(
 ) -> list[ManifestEntry]:
     """Register newly discovered files in the manifest and copy to repo.
 
-    Only registers files that are in the confirmed set (not requiring
-    confirmation) and marked ``include=True``.
+    Only registers files marked ``include=True``.
 
     Args:
         new_files: Discovered config files to register.
-        flag_results: Flagging results for sensitivity filtering.
         repo_path: Path to the dotfiles repository.
         home: Home directory path.
         cfg: DotSync configuration.
@@ -371,19 +367,11 @@ def register_new_files(
     Returns:
         List of newly created manifest entries.
     """
-    # Build set of confirmed file paths (no confirmation required)
-    confirmed: set[Path] = set()
-    for fr in flag_results:
-        if not fr.requires_confirmation:
-            confirmed.add(fr.config_file.abs_path)
-
     now = datetime.now(tz=timezone.utc).isoformat()
     new_entries: list[ManifestEntry] = []
 
     for cf in new_files:
         if cf.include is not True:
-            continue
-        if cf.abs_path not in confirmed:
             continue
 
         entry = ManifestEntry(

@@ -23,11 +23,6 @@ from dotsync.orchestrator import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Test helpers
-# ---------------------------------------------------------------------------
-
-
 def _cfg_file(path: str, include: bool | None = True) -> ConfigFile:
     return ConfigFile(
         path=Path(path),
@@ -200,9 +195,6 @@ class TestRunDiscover:
         )
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
-        monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
-        )
 
         result = run_discover(cfg, progress=None)
         assert result.excluded_count == 1
@@ -225,7 +217,7 @@ class TestRunDiscover:
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
         monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
+            "dotsync.orchestrator.register_new_files", lambda *a, **kw: []
         )
 
         result = run_discover(
@@ -247,9 +239,6 @@ class TestRunDiscover:
         )
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
-        monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
-        )
 
         result = run_discover(cfg, progress=None)
         assert files[0].include is False
@@ -264,9 +253,9 @@ class TestRunDiscover:
         calls: list[object] = []
 
         def fake_register(
-            new_files, flag_results, repo_path, home, cfg_obj, dry_run=False
+            new_files, repo_path, home, cfg_obj, dry_run=False
         ):
-            calls.append((new_files, flag_results))
+            calls.append((new_files,))
             return []
 
         monkeypatch.setattr(
@@ -274,9 +263,6 @@ class TestRunDiscover:
         )
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
-        monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
-        )
         monkeypatch.setattr("dotsync.orchestrator.register_new_files", fake_register)
 
         result = run_discover(
@@ -298,9 +284,6 @@ class TestRunDiscover:
         )
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
-        monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
-        )
         monkeypatch.setattr(
             "dotsync.orchestrator.register_new_files", lambda *a, **k: []
         )
@@ -332,9 +315,6 @@ class TestRunDiscover:
         monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
         monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: manifest)
         monkeypatch.setattr(
-            "dotsync.orchestrator.flag_all", lambda f, c, progress=None: []
-        )
-        monkeypatch.setattr(
             "dotsync.orchestrator.register_new_files", lambda *a, **k: []
         )
 
@@ -364,44 +344,7 @@ class TestRunDiscover:
         run_discover(cfg, progress=my_progress)
         assert passed_progress is my_progress
 
-    def test_sensitive_confirmation_callback(
-        self, cfg: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """resolve_sensitive callback should be invoked for flagged files."""
-        cf = _cfg_file(".env", include=True)
-        fr = _flag_result(
-            cf,
-            matches=[SensitiveMatch("api_key", 1, "sk***")],
-            requires_confirmation=True,
-        )
-        called: list[FlagResult] = []
 
-        def fake_flag_all(files, cfg, progress=None):
-            return [fr]
-
-        monkeypatch.setattr(
-            "dotsync.orchestrator.discover", lambda *args, **kwargs: [cf]
-        )
-        monkeypatch.setattr("dotsync.orchestrator.init_repo", lambda c: None)
-        monkeypatch.setattr("dotsync.orchestrator.load_manifest", lambda p: [])
-        monkeypatch.setattr("dotsync.orchestrator.flag_all", fake_flag_all)
-        monkeypatch.setattr(
-            "dotsync.orchestrator.register_new_files", lambda *a, **k: []
-        )
-
-        def _resolve(fr_obj: FlagResult) -> str:
-            called.append(fr_obj)
-            return "I"
-
-        result = run_discover(
-            cfg,
-            progress=None,
-            resolve_sensitive=_resolve,
-            confirm_register=lambda n: True,
-        )
-        assert len(called) == 1
-        assert called[0].config_file == cf
-        assert result.registered_count == 1
 
 
 # ---------------------------------------------------------------------------
