@@ -1,4 +1,4 @@
-"""DotSync — CLI tool to backup, sync, and encrypt configuration files."""
+"""DotSync — CLI tool to backup, sync, and restore configuration files."""
 
 from dotsync.config import (
     ConfigNotFoundError,

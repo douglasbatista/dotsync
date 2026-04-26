@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -21,26 +20,9 @@ runner = CliRunner()
 # ---------------------------------------------------------------------------
 
 
-def _patch_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Patch check_dependencies to skip git/git-crypt PATH checks.
-
-    Returns the mock for git-crypt subprocess calls.
-    """
+def _patch_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch check_dependencies to skip git PATH checks."""
     monkeypatch.setattr("dotsync.git_ops.check_dependencies", lambda: None)
-
-    import subprocess
-
-    real_run = subprocess.run
-
-    def _fake_run(args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        cmd = args if isinstance(args, list) else [args]
-        if cmd and str(cmd[0]) == "git-crypt":
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-        return real_run(args, **kwargs)
-
-    mock = MagicMock(side_effect=_fake_run)
-    monkeypatch.setattr("dotsync.git_ops.subprocess.run", mock)
-    return mock
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +73,6 @@ class TestStatusCommand:
         self,
         dotsync_env: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
-        mock_gitcrypt: Any,
     ) -> None:
         """'dotsync status' shows repo path and 0 managed files after init."""
         _patch_dependencies(monkeypatch)
@@ -149,7 +130,6 @@ class TestDiscoverCommand:
         dotsync_env: dict[str, Any],
         sample_dotfiles: list[Path],
         monkeypatch: pytest.MonkeyPatch,
-        mock_gitcrypt: Any,
     ) -> None:
         """'dotsync discover' finds dotfiles and lists them in output."""
         _patch_dependencies(monkeypatch)
@@ -178,7 +158,6 @@ class TestSyncDryRun:
         dotsync_env: dict[str, Any],
         sample_dotfiles: list[Path],
         monkeypatch: pytest.MonkeyPatch,
-        mock_gitcrypt: Any,
         mock_health_checks: Any,
     ) -> None:
         """'sync --dry-run --no-push' reports dry run and copies no files."""

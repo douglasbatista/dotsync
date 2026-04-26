@@ -1,15 +1,14 @@
-"""Git repository and git-crypt integration for DotSync.
+"""Git repository operations for DotSync.
 
-Wraps GitPython for standard Git operations and subprocess for git-crypt
-(no Python bindings exist).  This module manages the dotfiles repository:
-init, encryption, manifest tracking, commit/push/pull, and file copying.
+Wraps GitPython for standard Git operations. This module manages the
+dotfiles repository: init, manifest tracking, commit/push/pull, and
+file copying.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -24,11 +23,10 @@ from dotsync.platform_utils import current_os
 
 
 class MissingDependencyError(Exception):
-    """Raised when git or git-crypt is not found on PATH."""
+    """Raised when git is not found on PATH."""
 
 
-class GitCryptError(Exception):
-    """Raised when a git-crypt subprocess call fails."""
+
 
 
 class NoRemoteConfiguredError(Exception):
@@ -44,7 +42,6 @@ class MergeConflictError(Exception):
 # ---------------------------------------------------------------------------
 
 GITATTRIBUTES_CONTENT = """\
-* filter=git-crypt diff=git-crypt
 .gitattributes !filter !diff
 .dotsync_manifest.json !filter !diff
 """
@@ -57,10 +54,10 @@ MANIFEST_FILENAME = ".dotsync_manifest.json"
 
 
 def check_dependencies() -> None:
-    """Verify that git and git-crypt are available on PATH.
+    """Verify that git is available on PATH.
 
     Raises:
-        MissingDependencyError: If either tool is missing, with
+        MissingDependencyError: If git is missing, with
             platform-appropriate install hints.
     """
     os_name = current_os()
@@ -72,13 +69,6 @@ def check_dependencies() -> None:
             hint = "Install from: https://git-scm.com/download/win"
         raise MissingDependencyError(f"git not found on PATH. {hint}")
 
-    if shutil.which("git-crypt") is None:
-        if os_name == "linux":
-            hint = "Install with: sudo apt install git-crypt"
-        else:
-            hint = "Install from: https://github.com/AGWA/git-crypt"
-        raise MissingDependencyError(f"git-crypt not found on PATH. {hint}")
-
 
 # ---------------------------------------------------------------------------
 # Step 4.2 — Repository initialization
@@ -88,8 +78,8 @@ def check_dependencies() -> None:
 def init_repo(cfg: DotSyncConfig) -> git.Repo:
     """Initialize (or open) the dotfiles Git repository.
 
-    Creates the repo directory, writes ``.gitattributes`` (git-crypt config)
-    and an empty ``.dotsync_manifest.json``, then makes an initial commit.
+    Creates the repo directory, writes ``.gitattributes`` and an empty
+    ``.dotsync_manifest.json``, then makes an initial commit.
     Idempotent — returns the existing repo if ``.git`` already exists.
 
     Args:
@@ -105,7 +95,7 @@ def init_repo(cfg: DotSyncConfig) -> git.Repo:
 
     repo = git.Repo.init(cfg.repo_path)
 
-    # Write .gitattributes for git-crypt
+    # Write .gitattributes
     gitattributes = cfg.repo_path / ".gitattributes"
     gitattributes.write_text(GITATTRIBUTES_CONTENT, encoding="utf-8")
 
@@ -121,65 +111,7 @@ def init_repo(cfg: DotSyncConfig) -> git.Repo:
 
 
 # ---------------------------------------------------------------------------
-# Step 4.3 — git-crypt init / unlock
-# ---------------------------------------------------------------------------
-
-
-def init_gitcrypt(repo_path: Path, key_export_path: Path) -> None:
-    """Initialize git-crypt in a repository and export the symmetric key.
-
-    Args:
-        repo_path: Path to the Git repository.
-        key_export_path: Destination path for the exported key file.
-
-    Raises:
-        GitCryptError: If the git-crypt commands fail.
-    """
-    try:
-        subprocess.run(
-            ["git-crypt", "init"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-        key_export_path.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git-crypt", "export-key", str(key_export_path)],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
-        raise GitCryptError(
-            f"git-crypt init/export-key failed: {stderr}"
-        ) from exc
-
-
-def unlock_gitcrypt(repo_path: Path, key_path: Path) -> None:
-    """Unlock a git-crypt repository with a symmetric key.
-
-    Args:
-        repo_path: Path to the Git repository.
-        key_path: Path to the git-crypt symmetric key file.
-
-    Raises:
-        GitCryptError: If the unlock command fails.
-    """
-    try:
-        subprocess.run(
-            ["git-crypt", "unlock", str(key_path)],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
-        raise GitCryptError(f"git-crypt unlock failed: {stderr}") from exc
-
-
-# ---------------------------------------------------------------------------
-# Step 4.4 — Remote management
+# Step 4.3 — Remote management
 # ---------------------------------------------------------------------------
 
 

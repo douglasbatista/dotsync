@@ -17,7 +17,6 @@ Paths matching these patterns are **never** included — security invariants:
 .ssh/id_*.pub
 .gnupg/
 .dotsync/
-dotsync.key
 ```
 
 ### `PRUNE_DIRS` / `_PRUNE_PREFIXES`

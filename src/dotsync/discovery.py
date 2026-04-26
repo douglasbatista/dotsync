@@ -94,7 +94,6 @@ SAFETY_EXCLUDES: list[str] = [
     ".ssh/id_*.pub",
     ".gnupg/",
     ".dotsync/",
-    "dotsync.key",
 ]
 
 PRUNE_DIRS: list[str] = [

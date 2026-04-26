@@ -2,11 +2,10 @@
 
 ## Project
 
-**DotSync** — CLI tool to backup, sync, and restore configuration files (dotfiles) across Windows and Linux workstations. Backing store is a Git repo with git-crypt symmetric encryption. Optional AI triage via LiteLLM proxy.
+**DotSync** — CLI tool to backup, sync, and restore configuration files (dotfiles) across Windows and Linux workstations. Backing store is a Git repo. Optional AI triage via LiteLLM proxy.
 
 Key architectural decisions (do not change without instruction):
-- `git` and `git-crypt` are called via `subprocess` — no Python bindings exist for git-crypt
-- `GitPython` handles all other Git operations
+- `GitPython` handles all Git operations
 - AI calls use plain `httpx` targeting OpenAI-compatible endpoints (`/v1/chat/completions`) — no LLM SDK. Works with LiteLLM, OpenRouter, Ollama, or any OpenAI-compatible proxy.
 - Snapshots are local only, never committed to the repo
 

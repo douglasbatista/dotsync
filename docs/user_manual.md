@@ -20,11 +20,10 @@
 
 ## Overview
 
-DotSync backs up, encrypts, and syncs your configuration files (dotfiles) across machines using a private Git repository. Every file committed to the repository is encrypted at rest with **git-crypt** symmetric encryption — the repo is safe to push to any host.
+DotSync backs up and syncs your configuration files (dotfiles) across machines using a Git repository. Files are stored in plain text — push to a **private** remote to keep your dotfiles safe.
 
 Key capabilities:
 
-- **Encrypted storage** — git-crypt symmetric encryption; files are unreadable without your key
 - **Cross-platform sync** — handles Linux ↔ Windows path differences automatically
 - **Smart discovery** — heuristic scanner with optional AI classification decides what to include
 - **Sensitive-data protection** — regex and AI scanning flags secrets before they reach the repo
@@ -40,36 +39,6 @@ Key capabilities:
 | Python | 3.12.x | Required |
 | [uv](https://docs.astral.sh/uv/) | latest | Package manager |
 | git | any | Must be on PATH |
-| git-crypt | any | Must be on PATH |
-
-### Installing git-crypt
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt update && sudo apt install git-crypt
-```
-
-**Linux (Fedora):**
-```bash
-sudo dnf install git-crypt
-```
-
-**Linux (Arch):**
-```bash
-sudo pacman -S git-crypt
-```
-
-**Windows (Scoop):**
-```powershell
-scoop install git-crypt
-```
-
-**Windows (Chocolatey):**
-```powershell
-choco install git-crypt
-```
-
-**Windows (WSL):** install inside your WSL distribution using the Linux instructions above.
 
 ---
 
@@ -103,19 +72,17 @@ What `init` does:
 
 1. Creates `~/.dotsync/config.toml` with your settings
 2. Creates (or opens) the Git repo at `--repo-path`
-3. Runs `git-crypt init` and exports a symmetric key to `~/.dotsync/dotsync.key`
-4. Writes `.gitattributes` so git-crypt encrypts everything
-5. Sets the remote origin (if `--remote` is provided)
+3. Writes `.gitattributes` and an empty manifest
+4. Sets the remote origin (if `--remote` is provided)
 
-> **Keep your key safe.** `~/.dotsync/dotsync.key` is the only way to decrypt the repository. Back it up to a password manager or secure offline storage.
+> **Use a private remote.** Dotfiles are stored in plain text. Push only to private repositories to protect any sensitive values in your config files.
 
 ### Setting up a second machine
 
-On a new machine, clone the repository and unlock it with your key:
+On a new machine, clone the repository and run restore:
 
 ```bash
 git clone git@github.com:you/dotfiles.git ~/dotsync-repo
-git -C ~/dotsync-repo crypt unlock /path/to/dotsync.key
 uv run dotsync init --repo-path ~/dotsync-repo
 uv run dotsync restore
 ```
@@ -192,7 +159,7 @@ uv run dotsync discover [OPTIONS]
 
 The scanner walks your home directory and evaluates each file against:
 
-1. **Safety excludes** — SSH private keys, `.gnupg/`, the encryption key, `.dotsync/` — always blocked
+1. **Safety excludes** — SSH private keys, `.gnupg/`, `.dotsync/` — always blocked
 2. **Extension whitelist** — only `.toml`, `.yaml`, `.yml`, `.json`, `.ini`, `.cfg`, `.conf`, `.env`, `.rc`, `.plist`, `.xml`, `.properties`, `.jsonc`, `.config` pass
 3. **Heuristic rules** — home dotfiles, XDG config paths, Windows AppData paths
 4. **AI classification** (optional) — LLM decides include / exclude / ask_user
@@ -299,7 +266,7 @@ uv run dotsync config --show
 uv run dotsync config --set KEY=VALUE
 ```
 
-Valid keys: `repo_path`, `remote_url`, `gitcrypt_key_path`, `llm_endpoint`, `llm_api_key`, `llm_model`, `snapshot_keep`.
+Valid keys: `repo_path`, `remote_url`, `llm_endpoint`, `llm_api_key`, `llm_model`, `snapshot_keep`.
 
 Example:
 
@@ -319,7 +286,6 @@ Configuration is stored at `~/.dotsync/config.toml`.
 |-------|------|---------|-------------|
 | `repo_path` | path | `~/dotsync-repo` | Git repository for storing dotfiles |
 | `remote_url` | string | | Remote Git URL |
-| `gitcrypt_key_path` | path | `~/.dotsync/dotsync.key` | Path to git-crypt symmetric key |
 | `llm_endpoint` | string | | LiteLLM / OpenAI-compatible endpoint for AI triage |
 | `llm_api_key` | string | | Bearer token for the LLM endpoint (supports `{env:VAR}` substitution) |
 | `llm_model` | string | `claude-haiku-4-5` | LLM model name |
@@ -333,7 +299,6 @@ Configuration is stored at `~/.dotsync/config.toml`.
 ```toml
 repo_path = "/home/alice/dotsync-repo"
 remote_url = "git@github.com:alice/dotfiles.git"
-gitcrypt_key_path = "/home/alice/.dotsync/dotsync.key"
 llm_endpoint = "http://localhost:4000"
 llm_api_key = "{env:OPENROUTER_API_KEY}"
 llm_model = "claude-haiku-4-5"
@@ -352,15 +317,11 @@ timeout = 10
 
 ## Security Model
 
-### Encryption
-
-All files in the repository are encrypted with git-crypt symmetric encryption. The repository is unreadable without the key at `~/.dotsync/dotsync.key`. Pushing to a public or private remote is safe — the files are ciphertext.
-
 ### Multi-layer secret protection
 
 DotSync has three independent layers that prevent secrets from reaching the repository:
 
-1. **Safety excludes** (discovery layer) — SSH private keys (`.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`), `.gnupg/`, `.dotsync/`, and `dotsync.key` are blocked before any classification runs. Also enforced on `include_extra` paths.
+1. **Safety excludes** (discovery layer) — SSH private keys (`.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`), `.gnupg/`, `.dotsync/` are blocked before any classification runs. Also enforced on `include_extra` paths.
 
 2. **Regex scanning** (flagging layer) — eleven compiled patterns scan file contents for:
    - GitHub tokens (`ghp_`, `github_pat_`)
@@ -377,7 +338,7 @@ Files matching any of these are shown with a preview (values redacted) and you c
 
 ### NEVER_INCLUDE blocklist
 
-As a final backstop, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/`, and `dotsync_key` are hardcoded to `include=False` regardless of any other setting.
+As a final backstop, `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, and `.gnupg/` are hardcoded to `include=False` regardless of any other setting.
 
 ---
 
@@ -545,18 +506,6 @@ Files are tagged `linux`, `windows`, or `shared` during discovery based on where
 ---
 
 ## Troubleshooting
-
-### `git-crypt: command not found`
-
-Install git-crypt and ensure it is on your PATH. See [Installing git-crypt](#installing-git-crypt).
-
-### Decrypt error / locked repository
-
-The repository needs to be unlocked with the symmetric key before DotSync can read it:
-
-```bash
-git -C ~/dotsync-repo crypt unlock ~/.dotsync/dotsync.key
-```
 
 ### Files not discovered
 

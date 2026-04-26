@@ -90,29 +90,6 @@ def sample_dotfiles(dotsync_env: dict[str, Any]) -> list[Path]:
 
 
 @pytest.fixture()
-def mock_gitcrypt(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Patch subprocess.run to no-op git-crypt calls.
-
-    Only intercepts commands starting with ``git-crypt``; all other
-    subprocess calls pass through to the real implementation.
-    """
-    real_run = subprocess.run
-
-    def _fake_run(
-        args: Any,
-        **kwargs: Any,
-    ) -> subprocess.CompletedProcess[str]:
-        cmd = args if isinstance(args, list) else [args]
-        if cmd and str(cmd[0]) == "git-crypt":
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-        return real_run(args, **kwargs)
-
-    mock = MagicMock(side_effect=_fake_run)
-    monkeypatch.setattr("dotsync.git_ops.subprocess.run", mock)
-    return mock
-
-
-@pytest.fixture()
 def mock_health_checks(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch subprocess.run in dotsync.health to return success for all checks."""
     mock = MagicMock(

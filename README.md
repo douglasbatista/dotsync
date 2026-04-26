@@ -1,12 +1,11 @@
 # DotSync
 
-CLI tool to backup, sync, and restore configuration files (dotfiles) across Windows and Linux workstations, with git-crypt encryption and optional AI-powered file classification.
+CLI tool to backup, sync, and restore configuration files (dotfiles) across Windows and Linux workstations, with optional AI-powered file classification.
 
 **[Full user manual →](docs/user_manual.md)**
 
 ## Features
 
-- **Encrypted storage** -- git-crypt symmetric encryption for all synced files
 - **Cross-platform sync** -- Linux and Windows with automatic path transformation
 - **AI-powered classification** -- optional LLM triage to decide which files to include
 - **Local snapshots** -- timestamped backups with automatic rollback on health check failure
@@ -15,7 +14,7 @@ CLI tool to backup, sync, and restore configuration files (dotfiles) across Wind
 
 ## Quick Start
 
-**Prerequisites:** Python 3.12, [uv](https://docs.astral.sh/uv/), git, git-crypt.
+**Prerequisites:** Python 3.12, [uv](https://docs.astral.sh/uv/), git.
 
 ```bash
 # Install
@@ -40,7 +39,7 @@ See the [user manual](docs/user_manual.md) for setup on a second machine, AI tri
 
 | Command | Description | Key Flags |
 |---------|-------------|-----------|
-| `init` | Initialize configuration, repository, and git-crypt | `--repo-path`, `--remote`, `--llm-endpoint` |
+| `init` | Initialize configuration and repository | `--repo-path`, `--remote`, `--llm-endpoint` |
 | `discover` | Scan, classify, and register config files into the manifest | `--no-ai` |
 | `sync` | Copy managed files to the repo, commit, and push | `--dry-run`, `--no-push`, `--message` |
 | `restore` | Pull from remote and restore files to the home directory | `--dry-run`, `--no-pull`, `--from-snapshot` |
@@ -58,7 +57,6 @@ Configuration is stored at `~/.dotsync/config.toml`.
 |-------|------|---------|-------------|
 | `repo_path` | path | `~/dotsync-repo` | Git repository for storing dotfiles |
 | `remote_url` | string | | Remote Git URL |
-| `gitcrypt_key_path` | path | `~/.dotsync/dotsync.key` | Path to git-crypt symmetric key |
 | `llm_endpoint` | string | | LiteLLM / OpenAI-compatible endpoint for AI triage |
 | `llm_api_key` | string | | Bearer token for the LLM endpoint (supports `{env:VAR}` substitution) |
 | `llm_model` | string | `claude-haiku-4-5` | LLM model name |
@@ -73,13 +71,11 @@ uv run dotsync config --set llm_endpoint=http://localhost:4000
 
 ## Security
 
-DotSync uses git-crypt symmetric encryption. All files committed to the repository are encrypted at rest; they are only readable after unlocking with the key at `~/.dotsync/dotsync.key`.
+DotSync uses multiple layers to protect sensitive data from reaching the repository:
 
-Additional safeguards:
-
-- **SAFETY_EXCLUDES** -- SSH private keys, `.gnupg/`, `.dotsync/`, and the encryption key are blocked at the discovery layer before any classification
+- **SAFETY_EXCLUDES** -- SSH private keys, `.gnupg/`, `.dotsync/` are blocked at the discovery layer before any classification
 - **SENSITIVE_PATTERNS** -- 11 compiled regexes scan file contents for secrets (API keys, PEM blocks, connection strings, tokens)
-- **NEVER_INCLUDE blocklist** -- `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/`, and `dotsync_key` are unconditionally excluded as a final backstop
+- **NEVER_INCLUDE blocklist** -- `.ssh/id_rsa`, `.ssh/id_ed25519`, `.ssh/id_ecdsa`, `.gnupg/` are unconditionally excluded as a final backstop
 - **Interactive confirmation** -- files flagged as sensitive prompt for `[I]nclude / [E]xclude / [S]kip` before syncing
 
 ## AI Triage (Optional)
@@ -105,17 +101,6 @@ uv sync
 source .venv/bin/activate
 ```
 
-### Installing git-crypt
-
-| Platform | Command |
-|----------|---------|
-| Debian/Ubuntu | `sudo apt install git-crypt` |
-| Fedora | `sudo dnf install git-crypt` |
-| Arch | `sudo pacman -S git-crypt` |
-| Windows (Scoop) | `scoop install git-crypt` |
-| Windows (Choco) | `choco install git-crypt` |
-| WSL | Use Linux instructions inside the distribution |
-
 ### Tests
 
 ```bash
@@ -140,7 +125,7 @@ src/dotsync/
   config.py         # TOML config schema (Pydantic), load/save
   discovery.py      # File scanner, heuristic + AI classification
   flagging.py       # Sensitive data regex scanning and AI flagging
-  git_ops.py        # Git repository and git-crypt subprocess operations
+  git_ops.py        # Git repository operations
   sync.py           # Sync (home -> repo) and restore (repo -> home) engine
   snapshot.py       # Local timestamped backups and rollback
   health.py         # Post-operation health checks with auto-rollback

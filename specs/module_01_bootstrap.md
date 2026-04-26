@@ -67,7 +67,6 @@ Fields:
 ```
 repo_path: Path
 remote_url: str | None = None
-gitcrypt_key_path: Path | None = None
 llm_endpoint: str | None = None
 llm_model: str = "gpt-4o-mini"  # any model name accepted by the configured endpoint
 snapshot_keep: int = 5

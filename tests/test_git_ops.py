@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,9 +11,7 @@ import pytest
 
 from dotsync.config import DotSyncConfig
 from dotsync.git_ops import (
-    GITATTRIBUTES_CONTENT,
     MANIFEST_FILENAME,
-    GitCryptError,
     ManifestEntry,
     MergeConflictError,
     MissingDependencyError,
@@ -24,14 +21,12 @@ from dotsync.git_ops import (
     commit_and_push,
     copy_to_repo,
     get_remote,
-    init_gitcrypt,
     init_repo,
     load_manifest,
     pull,
     remove_from_manifest,
     save_manifest,
     set_remote,
-    unlock_gitcrypt,
 )
 
 
@@ -72,35 +67,16 @@ def _make_entry(
 
 
 class TestCheckDependencies:
-    def test_check_dependencies_passes_when_both_present(self) -> None:
-        """No error when both git and git-crypt are on PATH."""
+    def test_check_dependencies_passes_when_git_present(self) -> None:
+        """No error when git is on PATH."""
         with patch("dotsync.git_ops.shutil.which", return_value="/usr/bin/git"):
             check_dependencies()  # should not raise
 
     def test_check_dependencies_raises_on_missing_git(self) -> None:
         """MissingDependencyError when git is not found."""
-
-        def _which(name: str) -> str | None:
-            if name == "git":
-                return None
-            return "/usr/bin/git-crypt"
-
-        with patch("dotsync.git_ops.shutil.which", side_effect=_which), \
+        with patch("dotsync.git_ops.shutil.which", return_value=None), \
              patch("dotsync.git_ops.current_os", return_value="linux"):
             with pytest.raises(MissingDependencyError, match="git not found"):
-                check_dependencies()
-
-    def test_check_dependencies_raises_on_missing_gitcrypt(self) -> None:
-        """MissingDependencyError when git-crypt is not found."""
-
-        def _which(name: str) -> str | None:
-            if name == "git-crypt":
-                return None
-            return "/usr/bin/git"
-
-        with patch("dotsync.git_ops.shutil.which", side_effect=_which), \
-             patch("dotsync.git_ops.current_os", return_value="windows"):
-            with pytest.raises(MissingDependencyError, match="git-crypt not found"):
                 check_dependencies()
 
 
@@ -118,16 +94,16 @@ class TestInitRepo:
         assert isinstance(repo, git.Repo)
 
     def test_init_creates_gitattributes(self, tmp_path: Path) -> None:
-        """init_repo writes .gitattributes with git-crypt rules."""
+        """init_repo writes .gitattributes."""
         cfg = _cfg(tmp_path)
         init_repo(cfg)
         ga = cfg.repo_path / ".gitattributes"
         assert ga.exists()
         content = ga.read_text(encoding="utf-8")
-        assert "filter=git-crypt" in content
+        assert ".gitattributes !filter !diff" in content
 
-    def test_init_gitattributes_not_encrypted(self, tmp_path: Path) -> None:
-        """.gitattributes itself is excluded from encryption."""
+    def test_init_gitattributes_not_filtered(self, tmp_path: Path) -> None:
+        """.gitattributes itself is excluded from diff filtering."""
         cfg = _cfg(tmp_path)
         init_repo(cfg)
         content = (cfg.repo_path / ".gitattributes").read_text(encoding="utf-8")
@@ -153,58 +129,8 @@ class TestInitRepo:
 
 
 # ---------------------------------------------------------------------------
-# Step 4.3 — TestGitCrypt
-# ---------------------------------------------------------------------------
-
-
-class TestGitCrypt:
-    def test_init_gitcrypt_creates_keyfile(self, tmp_path: Path) -> None:
-        """init_gitcrypt calls git-crypt init and export-key."""
-        repo_path = tmp_path / "repo"
-        repo_path.mkdir()
-        key_path = tmp_path / "keys" / "dotsync.key"
-
-        with patch("dotsync.git_ops.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            init_gitcrypt(repo_path, key_path)
-
-            assert mock_run.call_count == 2
-            # First call: git-crypt init
-            args1 = mock_run.call_args_list[0]
-            assert args1[0][0] == ["git-crypt", "init"]
-            assert args1[1]["cwd"] == repo_path
-            # Second call: git-crypt export-key
-            args2 = mock_run.call_args_list[1]
-            assert args2[0][0] == ["git-crypt", "export-key", str(key_path)]
-
-    def test_unlock_gitcrypt_calls_correct_command(self, tmp_path: Path) -> None:
-        """unlock_gitcrypt runs git-crypt unlock with the key path."""
-        repo_path = tmp_path / "repo"
-        key_path = tmp_path / "dotsync.key"
-
-        with patch("dotsync.git_ops.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            unlock_gitcrypt(repo_path, key_path)
-
-            mock_run.assert_called_once()
-            args = mock_run.call_args[0][0]
-            assert args == ["git-crypt", "unlock", str(key_path)]
-
-    def test_unlock_raises_on_nonzero_exit(self, tmp_path: Path) -> None:
-        """GitCryptError raised when git-crypt unlock fails."""
-        repo_path = tmp_path / "repo"
-        key_path = tmp_path / "dotsync.key"
-
-        with patch("dotsync.git_ops.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "git-crypt", stderr=b"unlock failed"
-            )
-            with pytest.raises(GitCryptError, match="unlock failed"):
-                unlock_gitcrypt(repo_path, key_path)
-
-
-# ---------------------------------------------------------------------------
-# Step 4.4 — TestRemote
+# Step 4.3 — TestRemote
+# ---------------------------------------------------------------------------# Step 4.4 — TestRemote
 # ---------------------------------------------------------------------------
 
 

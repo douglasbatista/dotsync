@@ -39,7 +39,6 @@ include_extra = []
 
 Optional fields (omitted if not set):
 - `remote_url`
-- `gitcrypt_key_path`
 - `llm_endpoint`
 
 ## Implementation Details

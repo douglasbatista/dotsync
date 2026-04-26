@@ -29,7 +29,6 @@ class TestConfig:
 
         assert isinstance(cfg.repo_path, Path)
         assert cfg.remote_url is None
-        assert cfg.gitcrypt_key_path is None
         assert cfg.llm_endpoint is None
         assert cfg.llm_model == "claude-haiku-4-5"
         assert cfg.snapshot_keep == 5
@@ -51,7 +50,6 @@ class TestConfig:
                     cfg = DotSyncConfig(
                         repo_path=Path("/tmp/test-repo"),
                         remote_url="https://github.com/user/dotsync-repo.git",
-                        gitcrypt_key_path=Path("/tmp/key.bin"),
                         llm_endpoint="http://localhost:4000",
                         llm_model="claude-sonnet-4",
                         snapshot_keep=10,
@@ -69,7 +67,6 @@ class TestConfig:
                     # Verify all values match
                     assert loaded.repo_path == cfg.repo_path
                     assert loaded.remote_url == cfg.remote_url
-                    assert loaded.gitcrypt_key_path == cfg.gitcrypt_key_path
                     assert loaded.llm_endpoint == cfg.llm_endpoint
                     assert loaded.llm_model == cfg.llm_model
                     assert loaded.snapshot_keep == cfg.snapshot_keep
@@ -90,7 +87,6 @@ class TestConfig:
 
                 assert loaded.repo_path == cfg.repo_path
                 assert loaded.remote_url is None
-                assert loaded.gitcrypt_key_path is None
                 assert loaded.llm_endpoint is None
                 assert loaded.llm_model == cfg.llm_model
                 assert loaded.snapshot_keep == cfg.snapshot_keep
@@ -233,17 +229,6 @@ class TestConfigPathExpansion:
         assert cfg.repo_path.is_absolute()
         assert str(cfg.repo_path).startswith(str(Path.home()))
         assert cfg.repo_path.name == "dotsync-repo"
-
-    def test_config_expands_gitcrypt_key_path(self) -> None:
-        """Test that gitcrypt_key_path with ~ is expanded to an absolute Path."""
-        cfg = DotSyncConfig(
-            repo_path="/tmp/repo",
-            gitcrypt_key_path="~/keys/dotsync.key",  # type: ignore[arg-type]
-        )
-        assert cfg.gitcrypt_key_path is not None
-        assert cfg.gitcrypt_key_path.is_absolute()
-        assert str(cfg.gitcrypt_key_path).startswith(str(Path.home()))
-        assert cfg.gitcrypt_key_path.name == "dotsync.key"
 
     def test_config_expands_include_extra(self) -> None:
         """Test that include_extra paths with ~ are expanded to absolute Paths."""

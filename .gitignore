@@ -14,3 +14,5 @@ wheels/
 .ruff_cache/
 .pytest_cache/
 .blackboxcli/
+.claude/
+.playwright/

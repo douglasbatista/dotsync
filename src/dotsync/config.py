@@ -46,7 +46,6 @@ class DotSyncConfig(BaseModel):
 
     repo_path: Path = Field(..., description="Path to the Git repository for storing dotfiles")
     remote_url: str | None = Field(None, description="Optional remote Git repository URL")
-    gitcrypt_key_path: Path | None = Field(None, description="Path to git-crypt symmetric key file")
     llm_endpoint: str | None = Field(None, description="LiteLLM proxy endpoint for AI triage")
     llm_api_key: str | None = Field(None, description="Bearer token for the LLM endpoint")
     llm_model: str = Field("claude-haiku-4-5", description="LLM model to use for AI triage")
@@ -63,7 +62,7 @@ class DotSyncConfig(BaseModel):
             return v
         return _substitute_env(v)
 
-    @field_validator("repo_path", "gitcrypt_key_path", mode="before")
+    @field_validator("repo_path", mode="before")
     @classmethod
     def expand_single_path(cls, v: str | Path | None) -> Path | None:
         """Expand ~ and env vars for single path fields."""
@@ -93,7 +92,6 @@ def default_config() -> DotSyncConfig:
     return DotSyncConfig(
         repo_path=Path.home() / "dotsync-repo",
         remote_url=None,
-        gitcrypt_key_path=None,
         llm_endpoint=None,
         llm_api_key=None,
         llm_model="claude-haiku-4-5",
@@ -116,7 +114,7 @@ def load_config() -> DotSyncConfig:
     if not CONFIG_FILE.exists():
         raise ConfigNotFoundError(f"Configuration file not found: {CONFIG_FILE}")
 
-    _OPTIONAL_FIELDS = {"remote_url", "gitcrypt_key_path", "llm_endpoint", "llm_api_key"}
+    _OPTIONAL_FIELDS = {"remote_url", "llm_endpoint", "llm_api_key"}
 
     with CONFIG_FILE.open("rb") as f:
         data = tomllib.load(f)

@@ -9,10 +9,7 @@ from unittest.mock import patch
 from dotsync.config import DotSyncConfig
 from dotsync.discovery import ConfigFile
 from dotsync.flagging import (
-    NEVER_INCLUDE,
     SENSITIVE_PATTERNS,
-    FlagResult,
-    SensitiveMatch,
     _redact,
     ai_flag_check,
     enforce_never_include,
@@ -254,13 +251,6 @@ class TestNeverInclude:
     def test_ssh_private_key_always_excluded(self, tmp_path: Path) -> None:
         """SSH private keys in NEVER_INCLUDE are set to include=False."""
         cf = _config_file(tmp_path, ".ssh/id_rsa", "key content\n", include=True)
-        enforce_never_include([cf])
-        assert cf.include is False
-        assert cf.reason == "never_include"
-
-    def test_gitcrypt_key_always_excluded(self, tmp_path: Path) -> None:
-        """dotsync.key in NEVER_INCLUDE is set to include=False."""
-        cf = _config_file(tmp_path, "dotsync.key", "key data\n", include=True)
         enforce_never_include([cf])
         assert cf.include is False
         assert cf.reason == "never_include"

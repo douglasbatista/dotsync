@@ -1,8 +1,7 @@
 """Sensitive data flagging for configuration files.
 
 Scans files marked ``include=True`` by the discovery module for credentials,
-API keys, and PEM blocks before they enter the git repository.  This is a
-defense-in-depth layer — git-crypt encrypts everything, but users should
+API keys, and PEM blocks before they enter the git repository.  Users should
 consciously decide about sensitive files.
 """
 
@@ -49,7 +48,6 @@ NEVER_INCLUDE: list[str] = [
     ".ssh/id_ed25519",
     ".ssh/id_ecdsa",
     ".gnupg/",
-    "dotsync.key",
 ]
 
 # ---------------------------------------------------------------------------

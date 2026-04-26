@@ -9,7 +9,7 @@ Integration layer wiring all DotSync modules into a complete CLI using Typer and
 - `config.load_config()`, `save_config()`, `default_config()`, `CONFIG_FILE`, `CONFIG_DIR`
 - `discovery.discover(cfg)` → `list[ConfigFile]`
 - `flagging.flag_all(files, cfg)` → `list[FlagResult]`, `enforce_never_include(files)`
-- `git_ops.check_dependencies()`, `init_repo()`, `init_gitcrypt()`, `set_remote()`, `load_manifest()`, `commit_and_push()`, `pull()`
+- `git_ops.check_dependencies()`, `init_repo()`, `set_remote()`, `load_manifest()`, `commit_and_push()`, `pull()`
 - `sync.plan_sync()`, `execute_sync()`, `plan_restore()`, `execute_restore()`, `register_new_files()`
 - `snapshot.create_snapshot()`, `list_snapshots()`, `rollback()`, `verify_snapshot()`
 - `health.post_operation_checks()`, `HealthCheckFailedError`
@@ -22,7 +22,7 @@ Integration layer wiring all DotSync modules into a complete CLI using Typer and
 |---|---|---|
 | 0 | success | Normal completion |
 | 1 | health_check_failed | Post-op health check failure (auto-rollback performed) |
-| 2 | dependency_missing | `git` or `git-crypt` not on PATH |
+| 2 | dependency_missing | `git` not on PATH |
 | 3 | config_not_found | No `config.toml` — run `dotsync init` |
 | 4 | merge_conflict | Git pull resulted in merge conflicts |
 | 5 | user_aborted | User cancelled an interactive prompt |
@@ -47,7 +47,7 @@ Integration layer wiring all DotSync modules into a complete CLI using Typer and
 
 Options: `--repo-path`, `--remote`, `--llm-endpoint`
 
-Pipeline: check_dependencies → confirm overwrite → default_config → init_repo → init_gitcrypt → set_remote → save_config
+Pipeline: check_dependencies → confirm overwrite → default_config → init_repo → set_remote → save_config
 
 ### `discover`
 
