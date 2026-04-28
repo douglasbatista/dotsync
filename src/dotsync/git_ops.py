@@ -37,6 +37,10 @@ class MergeConflictError(Exception):
     """Raised when a pull results in merge conflicts."""
 
 
+class PullError(Exception):
+    """Raised when git pull fails (e.g. auth failure, network error)."""
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -44,6 +48,11 @@ class MergeConflictError(Exception):
 GITATTRIBUTES_CONTENT = """\
 .gitattributes !filter !diff
 .dotsync_manifest.json !filter !diff
+"""
+
+GITIGNORE_CONTENT = """\
+# Never commit the encryption key — it must be stored and transferred out-of-band
+dotsync.key
 """
 
 MANIFEST_FILENAME = ".dotsync_manifest.json"
@@ -99,12 +108,16 @@ def init_repo(cfg: DotSyncConfig) -> git.Repo:
     gitattributes = cfg.repo_path / ".gitattributes"
     gitattributes.write_text(GITATTRIBUTES_CONTENT, encoding="utf-8")
 
+    # Write .gitignore to keep the encryption key out of the repo
+    gitignore = cfg.repo_path / ".gitignore"
+    gitignore.write_text(GITIGNORE_CONTENT, encoding="utf-8")
+
     # Write empty manifest
     manifest = cfg.repo_path / MANIFEST_FILENAME
     manifest.write_text("[]", encoding="utf-8")
 
     # Stage and commit
-    repo.index.add([".gitattributes", MANIFEST_FILENAME])
+    repo.index.add([".gitattributes", ".gitignore", MANIFEST_FILENAME])
     repo.index.commit("chore: init dotsync repo")
 
     return repo
@@ -286,7 +299,30 @@ def pull(repo: git.Repo) -> None:
             "No remote configured. Set a remote with set_remote() before pulling."
         )
 
-    repo.remotes.origin.pull()
+    branch = repo.active_branch.name
+    origin = repo.remotes.origin
+
+    try:
+        origin.fetch(refspec=f"refs/heads/{branch}:refs/remotes/origin/{branch}")
+    except git.exc.GitCommandError as exc:
+        detail = (exc.stderr or "").strip() or f"git fetch failed (exit code {exc.status})"
+        raise PullError(detail) from exc
+
+    remote_ref = f"origin/{branch}"
+
+    # Detect whether local and remote share history (new-machine vs. normal pull).
+    has_common_ancestor = bool(repo.merge_base("HEAD", remote_ref))
+
+    try:
+        if not has_common_ancestor:
+            # New machine: local repo was freshly initialised with no shared history.
+            # Reset to remote so restore can proceed with the actual dotfiles.
+            repo.git.reset("--hard", remote_ref)
+        else:
+            repo.git.merge("--ff-only", remote_ref)
+    except git.exc.GitCommandError as exc:
+        detail = (exc.stderr or "").strip() or f"git pull failed (exit code {exc.status})"
+        raise PullError(detail) from exc
 
     if repo.index.unmerged_blobs():
         raise MergeConflictError(

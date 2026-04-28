@@ -79,13 +79,18 @@ What `init` does:
 
 ### Setting up a second machine
 
-On a new machine, clone the repository and run restore:
-
 ```bash
+# 1. Clone the existing dotfiles repository
 git clone git@github.com:you/dotfiles.git ~/dotsync-repo
-uv run dotsync init --repo-path ~/dotsync-repo
+
+# 2. Create dotsync config (repo already exists, no re-init happens)
+uv run dotsync init --repo-path ~/dotsync-repo --remote git@github.com:you/dotfiles.git
+
+# 4. Restore your dotfiles
 uv run dotsync restore
 ```
+
+Step 3 is safe to run on a cloned repo — `init` detects the existing `.git` directory and skips repository, only writing `~/.dotsync/config.toml`.
 
 ---
 

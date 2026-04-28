@@ -513,6 +513,7 @@ def restore(
     from dotsync.git_ops import (
         MergeConflictError,
         NoRemoteConfiguredError,
+        PullError,
         init_repo,
         load_manifest,
         pull,
@@ -552,6 +553,17 @@ def restore(
             print_success("Pulled latest changes")
         except NoRemoteConfiguredError:
             print_warning("No remote configured — skipping pull")
+        except PullError as exc:
+            msg = str(exc)
+            if "git-crypt" in msg or "smudge" in msg:
+                print_error(
+                    "Pull failed: git-crypt is not unlocked or the key doesn't match the remote.\n"
+                    f"  1. Copy your git-crypt key from the machine where you ran 'dotsync init'\n"
+                    f"  2. cd {cfg.repo_path} && git-crypt unlock /path/to/your.key\n"
+                    "  3. Re-run: dotsync restore"
+                )
+                raise typer.Exit(code=1) from exc
+            print_warning(f"Pull failed — restoring from local repo: {exc}")
         except MergeConflictError as exc:
             print_error(f"{exc}")
             raise typer.Exit(code=EXIT_CODES["merge_conflict"]) from exc

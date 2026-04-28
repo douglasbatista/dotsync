@@ -16,11 +16,12 @@ CLI tool to backup, sync, and restore configuration files (dotfiles) across Wind
 
 **Prerequisites:** Python 3.12, [uv](https://docs.astral.sh/uv/), git.
 
+**First machine:**
+
 ```bash
-# Install
 uv sync
 
-# Initialize config and repository
+# Initialize config, repository
 uv run dotsync init --repo-path ~/dotsync-repo --remote git@github.com:user/dotfiles.git
 
 # Discover and classify config files
@@ -28,12 +29,18 @@ uv run dotsync discover
 
 # Sync files to the repository
 uv run dotsync sync
+```
 
-# Restore files on another machine
+**Second machine** — clone first, then init (do not run `init` before cloning):
+
+```bash
+git clone git@github.com:user/dotfiles.git ~/dotsync-repo
+cd ~/dotsync-repo
+uv run dotsync init --repo-path ~/dotsync-repo --remote git@github.com:user/dotfiles.git
 uv run dotsync restore
 ```
 
-See the [user manual](docs/user_manual.md) for setup on a second machine, AI triage, health checks, snapshots, and troubleshooting.
+See the [user manual](docs/user_manual.md) for full setup details, AI triage, health checks, snapshots, and troubleshooting.
 
 ## Commands
 

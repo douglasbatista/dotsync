@@ -109,6 +109,21 @@ class TestInitRepo:
         content = (cfg.repo_path / ".gitattributes").read_text(encoding="utf-8")
         assert ".gitattributes !filter !diff" in content
 
+    def test_init_creates_gitignore(self, tmp_path: Path) -> None:
+        """init_repo writes .gitignore that excludes dotsync.key."""
+        cfg = _cfg(tmp_path)
+        init_repo(cfg)
+        gi = cfg.repo_path / ".gitignore"
+        assert gi.exists()
+        assert "dotsync.key" in gi.read_text(encoding="utf-8")
+
+    def test_gitignore_is_committed(self, tmp_path: Path) -> None:
+        """.gitignore is included in the initial commit."""
+        cfg = _cfg(tmp_path)
+        repo = init_repo(cfg)
+        tracked = [item.path for item in repo.head.commit.tree.traverse()]
+        assert ".gitignore" in tracked
+
     def test_init_creates_manifest(self, tmp_path: Path) -> None:
         """init_repo writes an empty manifest file."""
         cfg = _cfg(tmp_path)
@@ -250,7 +265,9 @@ class TestPushPull:
         repo = init_repo(cfg)
         set_remote(repo, "https://github.com/user/dotfiles.git")
 
-        with patch("git.remote.Remote.pull"), \
+        repo.git = MagicMock()
+        with patch("git.remote.Remote.fetch"), \
+             patch.object(repo, "merge_base", return_value=["abc123"]), \
              patch(
                  "git.index.base.IndexFile.unmerged_blobs",
                  return_value={"file.txt": [(1, MagicMock())]},
